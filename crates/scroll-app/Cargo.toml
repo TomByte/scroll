@@ -25,6 +25,9 @@ uuid.workspace = true
 security-framework.workspace = true
 objc.workspace = true
 syntect.workspace = true
+mermaid-rs-renderer.workspace = true
+resvg.workspace = true
+image.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

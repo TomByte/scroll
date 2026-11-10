@@ -47,6 +47,7 @@ icons! {
     ChevronRight => "chevron_right",
     Close => "close",
     Code => "code",
+    Diagram => "diagram",
     Ellipsis => "ellipsis",
     Grip => "grip",
     Hash => "hash",

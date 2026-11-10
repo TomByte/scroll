@@ -47,4 +47,9 @@ jsonwebtoken = { version = "11", default-features = false, features = ["rust_cry
 base64 = "0.22"
 # Code block highlighting: Sublime grammars, with the pure-Rust regex engine (no Oniguruma C build).
 syntect = { version = "5.2", default-features = false, features = ["default-syntaxes", "regex-fancy"] }
+# Mermaid diagram blocks: a pure-Rust parser and layout writing SVG, drawn with the resvg
+# version gpui already uses, into an image gpui can show.
+mermaid-rs-renderer = { version = "0.3.1", default-features = false }
+resvg = { version = "0.45", default-features = false, features = ["text", "system-fonts", "memmap-fonts"] }
+image = { version = "0.25", default-features = false }
 objc = "0.2"

@@ -25,7 +25,7 @@ fn block_kinds(_: &Target, _: &App) -> Vec<Choice> {
                 emoji: None,
                 value: ChoiceValue::BlockKind(kind),
             }),
-            SlashAction::CreateDatabase => None,
+            SlashAction::MermaidDiagram | SlashAction::CreateDatabase => None,
         })
         .collect()
 }

@@ -47,7 +47,7 @@ impl PageEditor {
         cx.notify();
     }
 
-    fn move_caret(&mut self, block: BlockId, offset: usize, cx: &mut Context<Self>) {
+    pub(super) fn move_caret(&mut self, block: BlockId, offset: usize, cx: &mut Context<Self>) {
         self.goal_x = None;
         self.set_selection(Selection::caret(block, offset), cx);
     }
@@ -140,8 +140,14 @@ impl PageEditor {
                 goal_x,
             });
         };
-        // A neighbour scrolled out of view has no layout yet; land at its nearest end.
-        let Some(neighbour_layout) = neighbour.layout.as_ref() else {
+        // A neighbour not laid out in the last frame (scrolled out of view, or a diagram showing
+        // its drawing instead of its source) may have an old layout of other text; land at its
+        // nearest end.
+        let current_layout = neighbour
+            .layout
+            .as_ref()
+            .filter(|_| neighbour.layout_frame == self.frame);
+        let Some(neighbour_layout) = current_layout else {
             let offset = match direction {
                 Direction::Backward => neighbour.content.text.len(),
                 Direction::Forward => 0,

@@ -447,14 +447,11 @@ mod tests {
     }
 
     #[test]
-    fn every_language_but_plain_text_has_a_grammar() {
+    fn every_language_but_plain_text_and_mermaid_has_a_grammar() {
         for language in CodeLanguage::ALL {
             let has_grammar = language.grammar(grammars()).is_some();
-            assert_eq!(
-                has_grammar,
-                *language != CodeLanguage::PlainText,
-                "{language:?}"
-            );
+            let is_plain = matches!(language, CodeLanguage::PlainText | CodeLanguage::Mermaid);
+            assert_eq!(has_grammar, !is_plain, "{language:?}");
         }
     }
 

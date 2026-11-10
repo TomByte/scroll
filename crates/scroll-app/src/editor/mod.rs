@@ -14,6 +14,7 @@ mod callout_icon;
 mod clipboard;
 mod code_language;
 pub mod commands;
+mod diagram_block;
 pub mod document;
 mod drag_drop;
 mod editing;
@@ -22,6 +23,7 @@ mod history;
 mod inline_completion;
 mod input_handler;
 pub mod markdown;
+mod mermaid;
 mod navigation;
 mod render;
 #[cfg(test)]
@@ -190,6 +192,7 @@ pub struct PageEditor {
     popups: Entity<PopupHost>,
     callout_picker_subscription: Option<Subscription>,
     code_highlights: syntax::CodeHighlights,
+    diagrams: diagram_block::Diagrams,
     drop_target: Option<drag_drop::DropTarget>,
     /// The caret moved since the pointer last did, so the drag handle shows on the caret's
     /// block rather than under a pointer that has not moved.
@@ -215,6 +218,8 @@ impl PageEditor {
     /// block to start in.
     pub fn new(mut page: PageDocument, selection: Selection, cx: &mut Context<Self>) -> Self {
         page.take_changes();
+        cx.on_release(|editor, cx| editor.diagrams.release_images(cx))
+            .detach();
         let blocks: Vec<BlockState> = page
             .blocks()
             .iter()
@@ -255,6 +260,7 @@ impl PageEditor {
             popups: cx.new(|_| PopupHost::new()),
             callout_picker_subscription: None,
             code_highlights: syntax::CodeHighlights::default(),
+            diagrams: diagram_block::Diagrams::default(),
             drop_target: None,
             is_handle_at_caret: false,
             page_width: PAGE_WIDTH.get(cx),

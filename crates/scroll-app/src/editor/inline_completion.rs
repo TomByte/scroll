@@ -217,6 +217,7 @@ impl PageEditor {
                 SlashAction::TurnInto(kind) => {
                     self.convert_block(completion.block, kind, typed, cx)
                 }
+                SlashAction::MermaidDiagram => self.convert_to_diagram(completion.block, typed, cx),
                 SlashAction::CreateDatabase => {
                     self.delete_range(typed, cx);
                     cx.emit(PageEditorEvent::CreateDatabase);

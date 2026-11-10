@@ -8,6 +8,8 @@ use crate::editor::document::BlockKind;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SlashAction {
     TurnInto(BlockKind),
+    /// Turns the block into a Mermaid diagram (a code block in the Mermaid language).
+    MermaidDiagram,
     /// Makes a database page inside this page and opens it.
     CreateDatabase,
 }
@@ -22,7 +24,7 @@ pub struct SlashCommand {
     pub aliases: &'static [&'static str],
 }
 
-pub const SLASH_COMMANDS: [SlashCommand; 12] = [
+pub const SLASH_COMMANDS: [SlashCommand; 13] = [
     command(
         "Text",
         "Plain paragraph",
@@ -86,6 +88,13 @@ pub const SLASH_COMMANDS: [SlashCommand; 12] = [
         IconName::Code,
         &["snippet", "pre"],
     ),
+    SlashCommand {
+        label: "Mermaid diagram",
+        hint: "A diagram drawn from text",
+        action: SlashAction::MermaidDiagram,
+        icon: IconName::Diagram,
+        aliases: &["mermaid", "flowchart", "chart", "graph", "sequence"],
+    },
     command(
         "Callout",
         "Make writing stand out",
@@ -151,7 +160,7 @@ mod tests {
         fn kind(&self) -> Option<BlockKind> {
             match self.action {
                 SlashAction::TurnInto(kind) => Some(kind),
-                SlashAction::CreateDatabase => None,
+                SlashAction::MermaidDiagram | SlashAction::CreateDatabase => None,
             }
         }
     }
@@ -190,6 +199,14 @@ mod tests {
         assert_eq!(
             matching_commands("data")[0].action,
             SlashAction::CreateDatabase
+        );
+        assert_eq!(
+            matching_commands("mer")[0].action,
+            SlashAction::MermaidDiagram
+        );
+        assert_eq!(
+            matching_commands("flowchart")[0].action,
+            SlashAction::MermaidDiagram
         );
     }
 }

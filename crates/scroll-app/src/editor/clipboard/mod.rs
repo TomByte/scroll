@@ -41,6 +41,7 @@ impl PageEditor {
                             block.info.is_checked,
                             &block.content,
                         )
+                        .with_language(self.page.block_language(block.info.id))
                     })
                     .collect(),
                 is_fragment: false,
@@ -116,6 +117,7 @@ pub(super) fn paste_blocks(
     if is_current_empty && !copied.is_fragment {
         page.set_kind(block, first.kind.block_kind())?;
         page.set_checked(block, first.is_checked)?;
+        page.set_block_language(block, first.language.as_deref())?;
     }
     let mut caret = range.start + first.text.len();
     let mut current = block;
@@ -132,6 +134,9 @@ pub(super) fn paste_blocks(
         }
         insert_marked_text(page, next, 0, copied_block)?;
         page.set_checked(next, copied_block.is_checked)?;
+        if let Some(language) = &copied_block.language {
+            page.set_block_language(next, Some(language))?;
+        }
         parents.truncate(copied_block.depth);
         parents.push(next);
         caret = copied_block.text.len();

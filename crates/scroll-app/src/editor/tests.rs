@@ -556,3 +556,187 @@ fn the_page_width_setting_reaches_an_open_editor(cx: &mut TestAppContext) {
         PageWidth::Full
     );
 }
+
+mod diagrams {
+    use gpui::{Modifiers, TestAppContext, VisualTestContext, px, size};
+
+    use super::{block, open_editor, texts};
+    use crate::editor::document::{BlockKind, PageDocument};
+    use crate::editor::mermaid::EXAMPLE_DIAGRAM;
+    use crate::editor::{PageAccess, PageEditor, Selection};
+
+    fn insert_diagram(
+        cx: &mut TestAppContext,
+    ) -> (gpui::Entity<PageEditor>, &mut VisualTestContext) {
+        let (editor, cx) = open_editor(&[""], cx);
+        cx.simulate_input("/mermaid");
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        (editor, cx)
+    }
+
+    /// The id of the image the diagram shows, and its error, once drawing has finished.
+    fn shown(
+        editor: &gpui::Entity<PageEditor>,
+        cx: &mut VisualTestContext,
+    ) -> (Option<gpui::ImageId>, Option<String>) {
+        cx.run_until_parked();
+        let first = block(editor, 0, cx);
+        editor.read_with(cx, |editor, _| {
+            let view = editor.diagrams.view(first);
+            assert!(!view.is_drawing, "drawing finished");
+            (
+                view.drawn.map(|drawn| drawn.image.id),
+                view.error.map(|error| error.to_string()),
+            )
+        })
+    }
+
+    fn is_editing(editor: &gpui::Entity<PageEditor>, cx: &mut VisualTestContext) -> bool {
+        let first = block(editor, 0, cx);
+        editor.update_in(cx, |editor, window, _| {
+            editor.is_editing_diagram(first, window)
+        })
+    }
+
+    #[gpui::test]
+    fn the_slash_menu_inserts_an_example_diagram_to_edit(cx: &mut TestAppContext) {
+        let (editor, cx) = insert_diagram(cx);
+        let first = block(&editor, 0, cx);
+        assert_eq!(texts(&editor, cx), [EXAMPLE_DIAGRAM]);
+        editor.read_with(cx, |editor, _| {
+            assert_eq!(editor.kind_of(first), BlockKind::Code);
+            assert!(editor.is_diagram(first));
+            assert_eq!(
+                editor.selection(),
+                Selection::caret(first, EXAMPLE_DIAGRAM.len())
+            );
+        });
+        assert!(
+            is_editing(&editor, cx),
+            "the source shows with the caret in it"
+        );
+        let (image, error) = shown(&editor, cx);
+        assert!(image.is_some() && error.is_none(), "{error:?}");
+        assert!(
+            cx.debug_bounds("diagram-image").is_some(),
+            "the preview is drawn"
+        );
+    }
+
+    #[gpui::test]
+    fn a_diagram_is_stored_as_a_mermaid_code_block(cx: &mut TestAppContext) {
+        let (editor, cx) = insert_diagram(cx);
+        let snapshot = editor.read_with(cx, |editor, _| editor.page().export_snapshot().unwrap());
+        let reloaded = PageDocument::from_snapshot(2, &snapshot).unwrap();
+        let first = reloaded.block_ids()[0];
+        assert_eq!(reloaded.blocks()[0].kind, BlockKind::Code);
+        assert_eq!(reloaded.block_language(first).as_deref(), Some("mermaid"));
+        assert_eq!(reloaded.block_content(first).unwrap().text, EXAMPLE_DIAGRAM);
+
+        // What builds from before diagrams wrote: a code block with no language stays code.
+        let older = PageDocument::create(3, &["graph TD"]).unwrap();
+        let code = older.ensure_block().unwrap();
+        older.set_kind(code, BlockKind::Code).unwrap();
+        let older = PageDocument::from_snapshot(4, &older.export_snapshot().unwrap()).unwrap();
+        let (editor, cx) =
+            cx.add_window_view(|_, cx| PageEditor::new(older, Selection::caret(code, 0), cx));
+        assert!(!editor.read_with(cx, |editor, _| editor.is_diagram(code)));
+    }
+
+    #[gpui::test]
+    fn an_edit_draws_the_diagram_again_and_an_error_keeps_the_last_drawing(
+        cx: &mut TestAppContext,
+    ) {
+        let (editor, cx) = insert_diagram(cx);
+        let (first_image, _) = shown(&editor, cx);
+
+        cx.simulate_keystrokes("enter");
+        cx.simulate_input("    C --> D[Archive]");
+        let (edited_image, error) = shown(&editor, cx);
+        assert!(error.is_none(), "{error:?}");
+        assert_ne!(edited_image, first_image, "the edit was drawn");
+
+        let (again, _) = shown(&editor, cx);
+        assert_eq!(
+            again, edited_image,
+            "an unchanged diagram is not drawn again"
+        );
+
+        // In one edit, as typing it a key at a time draws the states in between.
+        editor.update(cx, |editor, cx| {
+            let caret = editor.selection().range.head;
+            editor.type_text(caret..caret, " -->", cx)
+        });
+        let (kept_image, error) = shown(&editor, cx);
+        assert!(error.is_some(), "the broken source is reported");
+        assert_eq!(kept_image, edited_image, "the last good drawing stays up");
+
+        cx.simulate_keystrokes("backspace backspace backspace backspace");
+        let (_, error) = shown(&editor, cx);
+        assert!(error.is_none(), "fixing the source clears the error");
+    }
+
+    #[gpui::test]
+    fn the_source_shows_only_while_editing(cx: &mut TestAppContext) {
+        let (editor, cx) = insert_diagram(cx);
+        assert!(is_editing(&editor, cx));
+        let done = cx.debug_bounds("diagram-done").expect("a Done button");
+        cx.simulate_click(done.center(), Modifiers::none());
+        assert!(!is_editing(&editor, cx), "Done shows the diagram alone");
+
+        let edit = cx.debug_bounds("diagram-edit").expect("an Edit button");
+        cx.simulate_click(edit.center(), Modifiers::none());
+        assert!(is_editing(&editor, cx), "Edit shows the source again");
+    }
+
+    #[gpui::test]
+    fn arrowing_into_a_diagram_shows_its_source_from_the_nearest_end(cx: &mut TestAppContext) {
+        let (editor, cx) = open_editor(&["above", ""], cx);
+        let diagram = block(&editor, 1, cx);
+        editor.update(cx, |editor, cx| {
+            editor.convert_to_diagram(diagram, 0..0, cx)
+        });
+        let above = block(&editor, 0, cx);
+        editor.update(cx, |editor, cx| editor.move_caret(above, 5, cx));
+        cx.run_until_parked();
+        let is_editing = |cx: &mut VisualTestContext| {
+            editor.update_in(cx, |editor, window, _| {
+                editor.is_editing_diagram(diagram, window)
+            })
+        };
+        assert!(!is_editing(cx), "the caret left");
+
+        cx.simulate_keystrokes("down");
+        assert_eq!(
+            editor.read_with(cx, |editor, _| editor.selection()),
+            Selection::caret(diagram, 0)
+        );
+        assert!(is_editing(cx), "the source shows again");
+    }
+
+    #[gpui::test]
+    fn a_viewer_sees_the_diagram_but_not_its_source(cx: &mut TestAppContext) {
+        let (editor, cx) = insert_diagram(cx);
+        editor.update(cx, |editor, cx| editor.set_access(PageAccess::ReadOnly, cx));
+        cx.run_until_parked();
+        assert!(!is_editing(&editor, cx));
+        assert!(cx.debug_bounds("diagram-image").is_some());
+        assert!(cx.debug_bounds("diagram-edit").is_none());
+    }
+
+    #[gpui::test]
+    fn a_wide_diagram_is_scaled_down_to_the_column(cx: &mut TestAppContext) {
+        let (editor, cx) = insert_diagram(cx);
+        let natural = editor.read_with(cx, |editor, _| {
+            let first = editor.page().block_ids()[0];
+            editor.diagrams.view(first).drawn.unwrap().size
+        });
+        cx.simulate_resize(size(px(260.0), px(800.0)));
+        cx.run_until_parked();
+        let image = cx.debug_bounds("diagram-image").unwrap();
+        assert!(image.size.width < natural.width, "{image:?} {natural:?}");
+        let proportions = |size: gpui::Size<gpui::Pixels>| size.width / size.height;
+        assert!((proportions(image.size) - proportions(natural)).abs() < 0.01);
+    }
+}

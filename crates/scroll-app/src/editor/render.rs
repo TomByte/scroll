@@ -202,7 +202,9 @@ impl PageEditor {
             let element =
                 BlockElement::new(cx.entity(), id, self.block_paint(index, theme, is_focused));
             let text = div().flex_1().min_w_0().child(element);
-            if block.info.kind == BlockKind::Code {
+            if self.is_diagram(id) {
+                self.render_diagram_block(id, text, window, cx)
+            } else if block.info.kind == BlockKind::Code {
                 self.render_code_block(id, text, window, cx)
             } else {
                 decorate_text(block, theme, text)

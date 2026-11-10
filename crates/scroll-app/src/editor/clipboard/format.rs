@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::editor::code_language::CodeLanguage;
 use crate::editor::document::BlockKind;
 use crate::editor::rich_text::{MarkSpan, Marks, RichText};
 
@@ -13,6 +14,9 @@ pub struct CopiedBlock {
     /// Nesting below the shallowest copied block.
     pub depth: usize,
     pub is_checked: bool,
+    /// A code block's language id; absent in what older versions copied.
+    #[serde(default)]
+    pub language: Option<String>,
     pub text: String,
     pub spans: Vec<CopiedSpan>,
 }
@@ -90,6 +94,7 @@ impl CopiedBlock {
             kind: CopiedKind::from_block_kind(kind),
             depth,
             is_checked,
+            language: None,
             text: content.text.clone(),
             spans: content
                 .spans
@@ -106,6 +111,10 @@ impl CopiedBlock {
                 })
                 .collect(),
         }
+    }
+
+    pub fn with_language(self, language: Option<String>) -> CopiedBlock {
+        CopiedBlock { language, ..self }
     }
 
     /// The part of a block's content in `range`, with marks clipped to it.
@@ -151,7 +160,11 @@ pub fn to_markdown(copied: &Copied) -> String {
             CopiedKind::Bulleted => format!("- {text}"),
             CopiedKind::Numbered => format!("{number}. {text}"),
             CopiedKind::Quote | CopiedKind::Callout => format!("> {text}"),
-            CopiedKind::Code => format!("```\n{}\n```", block.text),
+            CopiedKind::Code => format!(
+                "```{}\n{}\n```",
+                block.language.as_deref().unwrap_or_default(),
+                block.text
+            ),
             CopiedKind::Divider => "---".to_string(),
         };
         lines.push(format!("{indent}{line}"));
@@ -198,7 +211,7 @@ pub fn from_markdown(text: &str) -> Copied {
             .take_while(|character| *character == ' ')
             .count();
         let trimmed = line.trim_start();
-        if trimmed.starts_with("```") {
+        if let Some(info) = trimmed.strip_prefix("```") {
             let code: Vec<&str> = lines
                 .by_ref()
                 .take_while(|line| !line.trim_start().starts_with("```"))
@@ -207,6 +220,7 @@ pub fn from_markdown(text: &str) -> Copied {
                 kind: CopiedKind::Code,
                 depth: 0,
                 is_checked: false,
+                language: fence_language(info),
                 text: code.join("\n"),
                 spans: Vec::new(),
             });
@@ -288,9 +302,16 @@ fn inline_from_markdown(line: &str) -> CopiedBlock {
         kind: CopiedKind::Paragraph,
         depth: 0,
         is_checked: false,
+        language: None,
         text,
         spans,
     }
+}
+
+/// The language a code fence names (```` ```rust ````), if it is one code blocks know.
+fn fence_language(info: &str) -> Option<String> {
+    let name = info.split_whitespace().next()?.to_lowercase();
+    CodeLanguage::from_id(Some(&name)).id().map(str::to_string)
 }
 
 enum InlineMark<'a> {
@@ -368,6 +389,24 @@ mod tests {
         );
         assert_eq!(copied.blocks[6].text, "fn main() {}");
         assert_eq!(to_markdown(&copied), markdown);
+    }
+
+    #[test]
+    fn code_fences_keep_a_known_language() {
+        let markdown = "```mermaid\ngraph TD\n  A --> B\n```\n```Rust\nfn main() {}\n```\n```cobol\nSTOP RUN.\n```";
+        let copied = from_markdown(markdown);
+        let languages: Vec<Option<&str>> = copied
+            .blocks
+            .iter()
+            .map(|block| block.language.as_deref())
+            .collect();
+        assert_eq!(languages, [Some("mermaid"), Some("rust"), None]);
+        assert_eq!(copied.blocks[0].text, "graph TD\n  A --> B");
+        assert!(to_markdown(&copied).starts_with("```mermaid\ngraph TD"));
+
+        let from_an_older_version = r#"{"blocks":[{"kind":"Code","depth":0,"is_checked":false,"text":"x","spans":[]}],"is_fragment":false}"#;
+        let copied: Copied = serde_json::from_str(from_an_older_version).unwrap();
+        assert_eq!(copied.blocks[0].language, None);
     }
 
     #[test]

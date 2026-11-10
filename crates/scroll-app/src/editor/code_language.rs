@@ -27,6 +27,7 @@ pub enum CodeLanguage {
     JavaScript,
     Json,
     Markdown,
+    Mermaid,
     Php,
     Python,
     Ruby,
@@ -53,6 +54,7 @@ impl CodeLanguage {
         CodeLanguage::JavaScript,
         CodeLanguage::Json,
         CodeLanguage::Markdown,
+        CodeLanguage::Mermaid,
         CodeLanguage::Php,
         CodeLanguage::Python,
         CodeLanguage::Ruby,
@@ -79,6 +81,7 @@ impl CodeLanguage {
             CodeLanguage::JavaScript => "javascript",
             CodeLanguage::Json => "json",
             CodeLanguage::Markdown => "markdown",
+            CodeLanguage::Mermaid => "mermaid",
             CodeLanguage::Php => "php",
             CodeLanguage::Python => "python",
             CodeLanguage::Ruby => "ruby",
@@ -114,6 +117,7 @@ impl CodeLanguage {
             CodeLanguage::JavaScript => "JavaScript",
             CodeLanguage::Json => "JSON",
             CodeLanguage::Markdown => "Markdown",
+            CodeLanguage::Mermaid => "Mermaid",
             CodeLanguage::Php => "PHP",
             CodeLanguage::Python => "Python",
             CodeLanguage::Ruby => "Ruby",
@@ -126,10 +130,10 @@ impl CodeLanguage {
     }
 
     /// The grammar it is highlighted with, by its name in the bundled set. TypeScript uses
-    /// JavaScript's, the closest the set has.
+    /// JavaScript's, the closest the set has; the set has none for Mermaid.
     pub(super) fn grammar(self, grammars: &SyntaxSet) -> Option<&SyntaxReference> {
         let name = match self {
-            CodeLanguage::PlainText => return None,
+            CodeLanguage::PlainText | CodeLanguage::Mermaid => return None,
             CodeLanguage::Bash => "Bourne Again Shell (bash)",
             CodeLanguage::JavaScript | CodeLanguage::TypeScript => "JavaScript",
             language => language.label(),
@@ -159,7 +163,21 @@ impl PageEditor {
         if self.code_highlights.is_highlighting(block) {
             window.request_animation_frame();
         }
-        let label = div()
+        let label = self.language_label(block, window, cx);
+        code_frame(text, label, &theme)
+    }
+
+    /// The block's language at the top right of its frame; choosing it opens the language
+    /// menu.
+    pub(super) fn language_label(
+        &self,
+        block: BlockId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = Theme::current(window, cx);
+        let language = self.code_language(block);
+        div()
             .id(ElementId::Name(format!("code-language-{block}").into()))
             .px(theme.spacing.sm)
             .rounded(theme.radius.sm)
@@ -176,22 +194,7 @@ impl PageEditor {
                         editor.open_language_menu(block, event, window, cx)
                     }))
                     .apply(label, window, cx)
-            });
-        div()
-            .relative()
-            .flex_1()
-            .min_w_0()
-            .p(theme.spacing.lg)
-            .rounded(theme.radius.md)
-            .bg(theme.colors.code_background)
-            .child(text)
-            .child(
-                div()
-                    .absolute()
-                    .top(theme.spacing.xs)
-                    .right(theme.spacing.xs)
-                    .child(label),
-            )
+            })
             .into_any_element()
     }
 
@@ -245,6 +248,26 @@ impl PageEditor {
             Ok(selection)
         });
     }
+}
+
+/// The code block's background around `text`, with `controls` at its top right.
+pub(super) fn code_frame(text: Div, controls: impl IntoElement, theme: &Theme) -> AnyElement {
+    div()
+        .relative()
+        .flex_1()
+        .min_w_0()
+        .p(theme.spacing.lg)
+        .rounded(theme.radius.md)
+        .bg(theme.colors.code_background)
+        .child(text)
+        .child(
+            div()
+                .absolute()
+                .top(theme.spacing.xs)
+                .right(theme.spacing.xs)
+                .child(controls),
+        )
+        .into_any_element()
 }
 
 #[cfg(test)]
