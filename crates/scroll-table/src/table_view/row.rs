@@ -219,9 +219,10 @@ impl TableView {
         theme: &Theme,
         cx: &mut Context<Self>,
     ) -> Stateful<gpui::Div> {
-        let is_head = self.selection == position;
-        let is_in_block =
-            !self.selected_range().is_single() && self.selected_range().contains(position);
+        let is_head = self.is_selection_shown && self.selection == position;
+        let is_in_block = self.is_selection_shown
+            && !self.selected_range().is_single()
+            && self.selected_range().contains(position);
         div()
             .id(ElementId::Name(
                 format!("cell-{}-{}", position.row, position.column).into(),
@@ -241,6 +242,8 @@ impl TableView {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |table, event: &MouseDownEvent, window, cx| {
+                    // The press is the cell's: on the body behind, it would deselect.
+                    cx.stop_propagation();
                     table.press_cell(position, event, window, cx)
                 }),
             )

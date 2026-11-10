@@ -161,6 +161,10 @@ impl TableView {
             .min_h_0()
             .relative()
             .on_scroll_wheel(cx.listener(Self::scroll_horizontally))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|table, _, window, cx| table.deselect(window, cx)),
+            )
             .child(measure)
             .child(rows)
             .child(Scrollbar::new("rows-scrollbar", self.scroll.clone()))

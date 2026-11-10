@@ -102,6 +102,8 @@ pub struct TableView {
     /// The cell the keyboard moves; with `anchor`, the selected block of cells.
     selection: CellPosition,
     anchor: CellPosition,
+    /// Off after a click on the table's empty space, until a cell is next selected.
+    is_selection_shown: bool,
     /// Whether the pointer is dragging out a block of cells.
     is_drag_selecting: bool,
     selected_rows: HashSet<PageId>,
@@ -151,6 +153,7 @@ impl TableView {
             scrolling_width: px(0.0),
             selection: CellPosition::default(),
             anchor: CellPosition::default(),
+            is_selection_shown: true,
             is_drag_selecting: false,
             selected_rows: HashSet::new(),
             text_edit: None,

@@ -28,6 +28,20 @@ impl TableView {
         self.anchor = anchor;
     }
 
+    /// A click on the table's empty space: saves any edit and lets go of the cells, so the
+    /// outline goes and keys no longer act on a cell nobody can see is selected.
+    pub(super) fn deselect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.text_edit.is_some() && !self.commit_text_edit(window, cx) {
+            return;
+        }
+        self.anchor = self.selection;
+        self.is_selection_shown = false;
+        // Without this the press would hand focus straight back to the table.
+        window.prevent_default();
+        window.blur();
+        cx.notify();
+    }
+
     /// Tab arrives here while a cell is being edited; the edit is saved before moving on.
     pub(super) fn move_selection(
         &mut self,
@@ -44,6 +58,7 @@ impl TableView {
     pub(super) fn select(&mut self, position: CellPosition, cx: &mut Context<Self>) {
         self.selection = position;
         self.anchor = position;
+        self.is_selection_shown = true;
         self.scroll
             .scroll_to_item(position.row, ScrollStrategy::Top);
         if let Some(column) = position.column.checked_sub(1) {

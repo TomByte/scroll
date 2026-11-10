@@ -1071,3 +1071,26 @@ fn escape_keeps_a_new_row_s_title_but_discards_other_edits(cx: &mut TestAppConte
         Some("kept")
     );
 }
+
+#[gpui::test]
+fn a_click_on_empty_space_lets_go_of_the_selected_cell(cx: &mut TestAppContext) {
+    let fixture = fixture(2);
+    let (table, cx) = open(&fixture, cx);
+    select(&table, 0, 1, cx);
+    cx.run_until_parked();
+
+    // Well below the two rows.
+    cx.simulate_click(
+        gpui::point(gpui::px(400.0), gpui::px(500.0)),
+        gpui::Modifiers::none(),
+    );
+    assert!(!table.read_with(cx, |table, _| table.is_selection_shown));
+    cx.simulate_keystrokes("h i");
+    assert!(
+        table.read_with(cx, |table, _| table.text_edit.is_none()),
+        "typing no longer edits the cell that was selected"
+    );
+
+    select(&table, 1, 1, cx);
+    assert!(table.read_with(cx, |table, _| table.is_selection_shown));
+}
