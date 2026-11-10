@@ -47,7 +47,7 @@ impl RenderOnce for ResizeHandle {
             .h_full()
             .w(theme.spacing.xs)
             .cursor(CursorStyle::ResizeColumn)
-            .hover(|handle| handle.bg(theme.colors.accent))
+            .hover(|handle| handle.bg(theme.colors.border_strong))
             .on_mouse_down(MouseButton::Left, move |event, window, cx| {
                 if let Some(on_press) = on_press.as_ref() {
                     on_press(event, window, cx);
