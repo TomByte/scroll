@@ -1,8 +1,12 @@
 //! Keyboard focus: Tab between controls, when focus rings show, and how they are drawn.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use gpui::{
-    App, ClickEvent, Div, ElementId, FocusHandle, Global, Hsla, InteractiveElement, ParentElement,
-    Pixels, Stateful, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
+    App, ClickEvent, Div, ElementId, FocusHandle, Global, Hsla, InteractiveElement, Keystroke,
+    ParentElement, Pixels, Stateful, StatefulInteractiveElement, Styled, Window, div,
+    prelude::FluentBuilder,
 };
 
 use crate::ClickHandler;
@@ -89,15 +93,32 @@ pub(crate) fn is_keyboard_focus_visible(cx: &App) -> bool {
         .is_some_and(|focus| focus.is_active)
 }
 
-/// A focus handle for a stateless control, kept across frames under `id`, and whether the
-/// control should draw its focus ring (it has focus, and focus came from the keyboard).
-fn control_focus(id: &ElementId, window: &mut Window, cx: &mut App) -> (FocusHandle, bool) {
-    let handle = window
-        .use_keyed_state(id.clone(), cx, |_, cx| cx.focus_handle().tab_stop(true))
+/// What a stateless control keeps across frames under its id.
+#[derive(Clone)]
+struct ControlState {
+    focus_handle: FocusHandle,
+    /// Set while Return or Space is held down on the control. GPUI clicks whatever has focus
+    /// when either key is released, so without this a key that closed a popup would, on its way
+    /// up, click the control focus went back to, and open the popup again.
+    is_key_held: Rc<Cell<bool>>,
+}
+
+/// The control's state, and whether it should draw its focus ring (it has focus, and focus came
+/// from the keyboard).
+fn control_state(id: &ElementId, window: &mut Window, cx: &mut App) -> (ControlState, bool) {
+    let state = window
+        .use_keyed_state(id.clone(), cx, |_, cx| ControlState {
+            focus_handle: cx.focus_handle().tab_stop(true),
+            is_key_held: Rc::default(),
+        })
         .read(cx)
         .clone();
-    let shows_ring = is_keyboard_focus_visible(cx) && handle.is_focused(window);
-    (handle, shows_ring)
+    let shows_ring = is_keyboard_focus_visible(cx) && state.focus_handle.is_focused(window);
+    (state, shows_ring)
+}
+
+fn is_click_key(keystroke: &Keystroke) -> bool {
+    matches!(keystroke.key.as_str(), "enter" | "space") && !keystroke.modifiers.modified()
 }
 
 /// A ring drawn just outside a focused control, like a CSS outline: it does not change the
@@ -180,9 +201,16 @@ impl Clickable {
         let Some(id) = element.interactivity().element_id.clone() else {
             return element;
         };
-        let (focus_handle, shows_ring) = control_focus(&id, window, cx);
+        let (state, shows_ring) = control_state(&id, window, cx);
+        let key_down = state.is_key_held.clone();
+        let key_up = state.is_key_held;
         element
-            .track_focus(&focus_handle)
+            .track_focus(&state.focus_handle)
+            .on_key_down(move |event, _, _| {
+                if is_click_key(&event.keystroke) {
+                    key_down.set(true);
+                }
+            })
             .relative()
             .when(shows_ring, |element| {
                 element.child(focus_outline(&theme, self.radius))
@@ -194,6 +222,68 @@ impl Clickable {
             .when_some(self.pressed, |element, fill| {
                 element.active(move |style| style.bg(fill))
             })
-            .when_some(self.on_click, |element, handler| element.on_click(handler))
+            .when_some(self.on_click, |element, handler| {
+                element.on_click(move |event, window, cx| {
+                    let was_key_held = key_up.replace(false);
+                    if matches!(event, ClickEvent::Keyboard(_)) && !was_key_held {
+                        return;
+                    }
+                    handler(event, window, cx)
+                })
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{Context, IntoElement, KeyUpEvent, Render, TestAppContext};
+
+    use super::*;
+
+    struct Counter {
+        focus_handle: FocusHandle,
+        clicks: usize,
+    }
+
+    impl Render for Counter {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let control = div().id("control").size_8();
+            let count = cx.listener(|counter, _: &ClickEvent, _, _| counter.clicks += 1);
+            tab_navigation(div().track_focus(&self.focus_handle)).child(
+                Clickable::new(Pixels::ZERO)
+                    .on_click(count)
+                    .apply(control, window, cx),
+            )
+        }
+    }
+
+    fn release(key: &str, cx: &mut gpui::VisualTestContext) {
+        let keystroke = Keystroke::parse(key).expect("test keys are valid keystrokes");
+        cx.simulate_event(KeyUpEvent { keystroke });
+    }
+
+    #[gpui::test]
+    fn a_key_released_on_a_control_clicks_it_only_if_it_was_pressed_there(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (counter, cx) = cx.add_window_view(|_, cx| Counter {
+            focus_handle: cx.focus_handle(),
+            clicks: 0,
+        });
+        counter.update_in(cx, |counter, window, _| window.focus(&counter.focus_handle));
+        cx.simulate_keystrokes("tab");
+        assert!(
+            !counter.update_in(cx, |counter, window, _| counter
+                .focus_handle
+                .is_focused(window)),
+            "Tab moves focus to the control"
+        );
+
+        // As when Return closes a popup and focus comes back before the key is let go.
+        release("enter", cx);
+        assert_eq!(counter.read_with(cx, |counter, _| counter.clicks), 0);
+
+        cx.simulate_keystrokes("enter");
+        release("enter", cx);
+        assert_eq!(counter.read_with(cx, |counter, _| counter.clicks), 1);
     }
 }
