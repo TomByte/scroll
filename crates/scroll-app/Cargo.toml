@@ -4,7 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "scroll"
+# Capitalised: without an app bundle, macOS shows the binary's name in the Dock and the menu bar.
+name = "Scroll"
 path = "src/main.rs"
 
 [dependencies]
