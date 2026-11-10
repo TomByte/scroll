@@ -45,6 +45,10 @@ impl Overlays {
             .update(cx, |modals, cx| modals.show(build, window, cx))
     }
 
+    pub fn showing<V: 'static>(&self, cx: &App) -> Option<Entity<V>> {
+        self.modals.read(cx).showing::<V>()
+    }
+
     /// Asks for one piece of text and runs `submit` with it.
     pub fn prompt(
         &self,

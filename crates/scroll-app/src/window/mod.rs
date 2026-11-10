@@ -419,13 +419,9 @@ impl Render for AppWindow {
             .bg(theme.colors.surface)
             .text_color(theme.colors.text)
             .font_family(theme.font.ui.clone())
-            .on_action(cx.listener(|this, command: &RunCommand, window, cx| {
-                let target = Target {
-                    page: command.page,
-                    ..Target::default()
-                };
-                this.run_command(command.id, target, window, cx)
-            }))
+            .on_action(
+                cx.listener(|this, command: &RunCommand, window, cx| this.run(command, window, cx)),
+            )
             .when(sidebar_shown > 0.0, |root| {
                 // The sidebar keeps its width and slides out from under this clip.
                 root.child(

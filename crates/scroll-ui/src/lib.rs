@@ -77,7 +77,7 @@ pub use motion::{Motion, MotionExt, MotionPreference, Transition};
 pub use overlays::dialog::Dialog;
 pub use overlays::error_bubble::ErrorBubble;
 pub use overlays::menu::{Menu, MenuItem};
-pub use overlays::modal::Modal;
+pub use overlays::modal::{Modal, ModalCloseButton};
 pub use overlays::modal_layer::ModalLayer;
 pub use overlays::popover::Popover;
 pub use overlays::popup_host::{PopupAnchor, PopupHost, PopupTrigger};

@@ -1,22 +1,29 @@
-//! The settings page, drawn from the registry: a section per category, a row per setting with
-//! the control its kind calls for.
+//! The settings page, drawn from the registry: the categories down the side, and a row per
+//! setting of the one picked, with the control its kind calls for.
 
 use gpui::{
-    AnyElement, App, Context, DismissEvent, EventEmitter, FocusHandle, Focusable, IntoElement,
-    ParentElement, Render, Styled, Subscription, Window, div, prelude::FluentBuilder,
+    AnyElement, App, Context, DismissEvent, EventEmitter, FocusHandle, Focusable, FontWeight,
+    InteractiveElement, IntoElement, ParentElement, Pixels, Render, StatefulInteractiveElement,
+    Styled, Subscription, Window, div, prelude::FluentBuilder, px,
 };
 use scroll_settings::{AnySetting, Category, Control, Settings};
 use scroll_ui::{
-    Button, ButtonSize, ButtonVariant, Dialog, Divider, SectionHeader, SegmentedControl, Switch,
-    Theme,
+    Button, ButtonSize, Divider, ListItem, Modal, ModalCloseButton, SegmentedControl, Switch, Theme,
 };
 use serde_json::Value;
 
 use crate::commands::RunCommand;
 use crate::mcp;
 
+/// Wide enough for the categories beside a column of settings.
+const PAGE_WIDTH: Pixels = px(760.0);
+const PAGE_HEIGHT: Pixels = px(520.0);
+const CATEGORIES_WIDTH: Pixels = px(200.0);
+
 pub struct SettingsPage {
     focus_handle: FocusHandle,
+    /// The category whose settings show; `None` until one is picked, which shows the first.
+    category: Option<Category>,
     _settings: Subscription,
 }
 
@@ -32,9 +39,49 @@ impl SettingsPage {
     pub fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {
         SettingsPage {
             focus_handle: cx.focus_handle(),
+            category: None,
             // Shows changes made elsewhere too, such as a theme command run meanwhile.
             _settings: cx.observe_global::<Settings>(|_, cx| cx.notify()),
         }
+    }
+
+    fn render_categories(
+        &self,
+        categories: &[Category],
+        shown: Option<Category>,
+        theme: &Theme,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let rows = categories.iter().map(|&category| {
+            ListItem::new(category.label(), category.label())
+                .when(shown == Some(category), ListItem::selected)
+                .on_click(cx.listener(move |page, _, _, cx| {
+                    page.category = Some(category);
+                    cx.notify();
+                }))
+        });
+        div()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .gap(theme.spacing.xs)
+            .w(CATEGORIES_WIDTH)
+            .h_full()
+            .p(theme.spacing.md)
+            .bg(theme.colors.surface_secondary)
+            .border_r(theme.size.border_width)
+            .border_color(theme.colors.border)
+            .child(
+                div()
+                    .px(theme.spacing.sm)
+                    .pt(theme.spacing.sm)
+                    .pb(theme.spacing.md)
+                    .text_size(theme.text.heading_3.size)
+                    .line_height(theme.text.heading_3.line_height)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Settings"),
+            )
+            .children(rows)
     }
 }
 
@@ -42,33 +89,69 @@ impl Render for SettingsPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::current(window, cx);
         let sections = Settings::sections(cx);
-        let section_count = sections.len();
-        let sections = sections
+        let categories: Vec<Category> = sections.iter().map(|(category, _)| *category).collect();
+        let shown = self.category.or(categories.first().copied());
+        let settings = sections
+            .into_iter()
+            .find(|(category, _)| Some(*category) == shown)
+            .map(|(_, settings)| settings)
+            .unwrap_or_default();
+        let last = settings.len().saturating_sub(1);
+        let rows = settings
             .into_iter()
             .enumerate()
-            .map(|(index, (category, settings))| {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(theme.spacing.sm)
-                    .child(SectionHeader::new(category.label()))
-                    .children(settings.into_iter().map(|setting| row(setting, &theme, cx)))
-                    .when(
-                        category == Category::Integrations && mcp::SERVER_ENABLED.get(cx),
-                        |section| section.child(mcp_connection_row(&theme)),
-                    )
-                    .when(index + 1 < section_count, |section| {
-                        section.child(Divider::horizontal())
-                    })
+            .flat_map(|(index, setting)| {
+                let divider = (index < last).then(|| Divider::horizontal().into_any_element());
+                std::iter::once(row(setting, &theme, cx)).chain(divider)
             });
-        Dialog::new("Settings")
-            .track_focus(&self.focus_handle)
-            .children(sections)
-            .action(
-                Button::new("done", "Done")
-                    .variant(ButtonVariant::Primary)
-                    .on_click(cx.listener(|_, _, _, cx| cx.emit(DismissEvent))),
-            )
+        let has_mcp_row = shown == Some(Category::Integrations) && mcp::SERVER_ENABLED.get(cx);
+        let content = div()
+            .id("settings")
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .gap(theme.spacing.lg)
+            .px(theme.spacing.xl)
+            .pb(theme.spacing.xl)
+            .overflow_y_scroll()
+            .children(rows)
+            .when(has_mcp_row, |content| {
+                content
+                    .child(Divider::horizontal())
+                    .child(mcp_connection_row(&theme))
+            });
+        let heading = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_between()
+            .px(theme.spacing.xl)
+            .pt(theme.spacing.lg)
+            .pb(theme.spacing.lg)
+            .text_size(theme.text.heading_3.size)
+            .line_height(theme.text.heading_3.line_height)
+            .font_weight(FontWeight::SEMIBOLD)
+            .children(shown.map(Category::label))
+            .child(ModalCloseButton);
+        Modal::new().width(PAGE_WIDTH).child(
+            div()
+                .track_focus(&self.focus_handle)
+                .flex()
+                .h(PAGE_HEIGHT)
+                .text_size(theme.text.ui.size)
+                .child(self.render_categories(&categories, shown, &theme, cx))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .child(heading)
+                        .child(content),
+                ),
+        )
     }
 }
 
@@ -112,13 +195,13 @@ fn labelled_row(
         .items_center()
         .justify_between()
         .gap(theme.spacing.lg)
-        .px(theme.spacing.sm)
         .child(
             div()
                 .flex()
                 .flex_col()
                 .flex_1()
                 .min_w_0()
+                .gap(theme.spacing.xs)
                 .child(label)
                 .child(
                     div()

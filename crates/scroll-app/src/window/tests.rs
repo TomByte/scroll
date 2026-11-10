@@ -205,8 +205,9 @@ fn the_settings_page_opens_with_cmd_comma_and_the_window_follows_its_theme(
 
     cx.simulate_keystrokes("cmd-,");
     cx.run_until_parked();
-    // The page's first control is the theme's first option, "System"; the next is "Light".
-    cx.simulate_keystrokes("tab tab");
+    // Past the one category, the first control is the theme's first option, "System"; the next
+    // is "Light".
+    cx.simulate_keystrokes("tab tab tab");
     cx.simulate_keystrokes("space");
     cx.simulate_event(gpui::KeyUpEvent {
         keystroke: gpui::Keystroke::parse("space").unwrap(),
@@ -330,4 +331,36 @@ fn a_click_on_the_title_edits_it_again_after_typing_in_the_page(cx: &mut TestApp
     cx.simulate_input("Plans");
 
     assert_eq!(current_title(&app, &workspace, cx), "Plans");
+}
+
+#[gpui::test]
+fn the_settings_shortcut_works_with_nothing_focused_and_opens_only_one_page(
+    cx: &mut TestAppContext,
+) {
+    use crate::settings::SettingsPage;
+
+    let (app, _workspace, cx) = open_app(cx);
+    let page = |cx: &mut VisualTestContext| {
+        app.read_with(cx, |app, cx| app.overlays.showing::<SettingsPage>(cx))
+    };
+    let window = app.downgrade();
+    cx.update(|window_state, cx| {
+        crate::app::adopt_window_for_tests(window, cx);
+        window_state.blur();
+    });
+
+    cx.simulate_keystrokes("cmd-,");
+    cx.run_until_parked();
+    let first = page(cx).expect("the shortcut opens the page with nothing focused");
+    cx.simulate_keystrokes("cmd-,");
+    assert_eq!(
+        page(cx),
+        Some(first),
+        "pressing it again leaves the open page alone"
+    );
+
+    cx.simulate_keystrokes("escape");
+    assert_eq!(page(cx), None);
+    cx.simulate_keystrokes("cmd-,");
+    assert!(page(cx).is_some(), "it opens again after closing");
 }

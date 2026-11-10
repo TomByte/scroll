@@ -89,12 +89,7 @@ pub fn run() {
 /// GPUI app. Separate from `run` so tools (such as the scale probe example) can drive the real
 /// app on a directory of their own.
 pub fn start(data_directory: PathBuf, cx: &mut App) {
-    // With no window open, quitting from the menu or ⌘Q still works.
-    cx.on_action(|command: &RunCommand, cx| {
-        if command.id == crate::window::commands::QUIT {
-            cx.quit();
-        }
-    });
+    run_commands_the_window_missed(cx);
     cx.on_action(|request: &OpenWorkspace, cx| open::open_workspace(request.index, cx));
     cx.on_app_quit(|cx| {
         prepare_to_quit(cx);
@@ -155,4 +150,35 @@ fn prepare_to_quit(cx: &mut App) {
         });
         storage.shut_down();
     }
+}
+
+/// A key or menu command reaches here when the window did not take it: it has nothing focused to
+/// send it from (so its shortcuts would do nothing), or there is no window and only quitting
+/// applies.
+fn run_commands_the_window_missed(cx: &mut App) {
+    cx.on_action(|command: &RunCommand, cx| {
+        if command.id == crate::window::commands::QUIT {
+            return cx.quit();
+        }
+        let (Some(app_window), Some(handle)) = (AppState::window(cx), main_window(cx)) else {
+            return;
+        };
+        let command = command.clone();
+        // Deferred: the window is in the middle of handling the key, and cannot be updated yet.
+        cx.defer(move |cx| {
+            let ran = handle.update(cx, |_, window, cx| {
+                app_window.update(cx, |app_window, cx| app_window.run(&command, window, cx));
+            });
+            if let Err(error) = ran {
+                log::warn!("the window closed before it could run a command: {error}");
+            }
+        });
+    });
+}
+
+/// The main window as the window tests open it, with commands reaching it as in the app.
+#[cfg(test)]
+pub(crate) fn adopt_window_for_tests(window: WeakEntity<AppWindow>, cx: &mut App) {
+    AppState::set_window(window, cx);
+    run_commands_the_window_missed(cx);
 }

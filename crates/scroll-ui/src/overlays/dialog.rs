@@ -1,16 +1,14 @@
 use gpui::{
     AnyElement, AnyView, App, AppContext, Context, Entity, FocusHandle, FontWeight,
-    InteractiveElement, IntoElement, ParentElement, Render, RenderOnce, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
+    InteractiveElement, IntoElement, ParentElement, Render, RenderOnce, SharedString, Styled,
+    Window, div, prelude::FluentBuilder,
 };
 
 use crate::controls::button::{Button, ButtonVariant};
 use crate::controls::form_field::FormField;
 use crate::controls::text_input::TextInput;
-use crate::display::icon::{Icon, IconName, IconSize};
-use crate::foundation::actions::{Cancel, Confirm, DIALOG_CONTEXT};
-use crate::overlays::modal::Modal;
-use crate::overlays::tooltip::Tooltip;
+use crate::foundation::actions::{Confirm, DIALOG_CONTEXT};
+use crate::overlays::modal::{Modal, ModalCloseButton};
 use crate::theme::Theme;
 
 type ConfirmHandler = Box<dyn Fn(&mut Window, &mut App) + 'static>;
@@ -108,7 +106,7 @@ impl RenderOnce for Dialog {
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .child(self.title),
                         )
-                        .child(close_button(&theme)),
+                        .child(ModalCloseButton),
                 )
                 .when_some(self.description, |dialog, description| {
                     dialog.child(div().text_color(theme.colors.text_muted).child(description))
@@ -129,30 +127,6 @@ impl RenderOnce for Dialog {
                 }),
         )
     }
-}
-
-/// Closes the dialog the way Escape does, so the `ModalLayer` showing it handles both. For the
-/// pointer only: Escape already closes from the keyboard, and as a Tab stop it would come before
-/// the dialog's first field.
-fn close_button(theme: &Theme) -> impl IntoElement {
-    let hover = theme.colors.hover;
-    div()
-        .id("close-dialog")
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .size(theme.size.control_small)
-        .rounded(theme.radius.md)
-        .cursor_pointer()
-        .hover(move |button| button.bg(hover))
-        .child(
-            Icon::new(IconName::Close)
-                .size(IconSize::Small)
-                .color(theme.colors.icon),
-        )
-        .tooltip(Tooltip::text("Close"))
-        .on_click(|_, window, cx| window.dispatch_action(Box::new(Cancel), cx))
 }
 
 impl Dialog {

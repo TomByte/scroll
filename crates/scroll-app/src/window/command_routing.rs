@@ -17,6 +17,15 @@ use scroll_core::id::PageId;
 use super::*;
 
 impl AppWindow {
+    /// Runs a command sent as an action, by a key or a menu.
+    pub fn run(&mut self, command: &RunCommand, window: &mut Window, cx: &mut Context<Self>) {
+        let target = Target {
+            page: command.page,
+            ..Target::default()
+        };
+        self.run_command(command.id, target, window, cx)
+    }
+
     /// Runs command `id` (from a key, a menu, the palette or a page's menu) for `target`.
     pub(super) fn run_command(
         &mut self,
@@ -119,7 +128,10 @@ impl AppWindow {
             return request_open_workspace(open.index, cx);
         }
         if action.is::<OpenSettings>() {
-            self.overlays.show_modal(SettingsPage::new, window, cx);
+            // Opening it again would start it over: its entrance, and the category picked.
+            if self.overlays.showing::<SettingsPage>(cx).is_none() {
+                self.overlays.show_modal(SettingsPage::new, window, cx);
+            }
             return;
         }
         if action.is::<CopyConnectionCommand>() {

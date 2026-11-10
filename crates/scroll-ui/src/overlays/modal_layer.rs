@@ -64,6 +64,11 @@ impl ModalLayer {
         view
     }
 
+    /// The open modal if it is a `V`, so a command can leave its modal alone when it is already up.
+    pub fn showing<V: 'static>(&self) -> Option<Entity<V>> {
+        self.active.as_ref()?.view.clone().downcast::<V>().ok()
+    }
+
     pub fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(active) = self.active.take() else {
             return;
