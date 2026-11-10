@@ -261,7 +261,8 @@ impl CommandPalette {
                         value: ChoiceValue::Page(Some(hit.page_id)),
                     })
                 } else {
-                    let snippet = (hit.snippet != hit.title).then(|| hit.snippet.into());
+                    let snippet =
+                        (hit.snippet != hit.title).then(|| on_one_line(&hit.snippet).into());
                     Item::Page {
                         id: hit.page_id,
                         title,
@@ -312,4 +313,23 @@ pub(super) fn tagged_page_items(pages: &[scroll_core::record::Page], query: &str
             snippet: None,
         })
         .collect()
+}
+
+/// A search snippet can span several blocks, each on its own line. A row draws every line it is
+/// given, so the later ones would land on top of the rows below.
+fn on_one_line(snippet: &str) -> String {
+    snippet.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::on_one_line;
+
+    #[test]
+    fn a_snippet_across_blocks_becomes_one_line() {
+        assert_eq!(
+            on_one_line("first block\nsecond  block\n"),
+            "first block second block"
+        );
+    }
 }
