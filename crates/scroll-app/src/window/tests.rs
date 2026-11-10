@@ -296,3 +296,22 @@ fn the_full_width_command_flips_the_page_width_setting(cx: &mut TestAppContext) 
     assert_eq!(run(cx), PageWidth::Full);
     assert_eq!(run(cx), PageWidth::Constrained);
 }
+
+#[gpui::test]
+async fn clicking_a_breadcrumb_opens_that_ancestor(cx: &mut TestAppContext) {
+    let (app, workspace, cx) = open_app(cx);
+    let parent = app.read_with(cx, |app, _| app.current_page()).unwrap();
+    let child = workspace
+        .update(cx, |workspace, cx| workspace.create_page(Some(parent), cx))
+        .await
+        .expect("the page is created");
+    app.update_in(cx, |app, window, cx| app.open_page(child, window, cx));
+    cx.run_until_parked();
+
+    let crumb = cx
+        .debug_bounds("crumb-0")
+        .expect("the parent's breadcrumb is drawn");
+    cx.simulate_click(crumb.center(), gpui::Modifiers::none());
+
+    assert_eq!(app.read_with(cx, |app, _| app.current_page()), Some(parent));
+}

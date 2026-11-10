@@ -10,8 +10,8 @@ use crate::window::commands::{GO_BACK, GO_FORWARD};
 use crate::workspace::page_tree::labelled_title;
 use crate::workspace::sync_state::SyncState;
 use gpui::{
-    AnyElement, Context, FontWeight, IntoElement, ParentElement, Pixels, Styled, div,
-    prelude::FluentBuilder,
+    AnyElement, Context, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    Pixels, StatefulInteractiveElement, Styled, div, prelude::FluentBuilder,
 };
 use scroll_ui::{
     Avatar, Button, ButtonSize, ButtonVariant, Ellipsis, IconButton, IconName, Theme,
@@ -33,35 +33,51 @@ impl AppWindow {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let tree = self.workspace.read(cx).tree();
-        let crumbs: Vec<String> = self
+        let crumbs: Vec<(PageId, String)> = self
             .current_page()
             .map(|page| tree.ancestors_and_self(page))
             .unwrap_or_default()
             .into_iter()
             .rev()
-            .filter_map(|page| tree.page(page).map(labelled_title))
+            .filter_map(|id| tree.page(id).map(|page| (id, labelled_title(page))))
             .collect();
         let crumb_count = crumbs.len();
-        let breadcrumbs = crumbs.into_iter().enumerate().flat_map(|(index, title)| {
-            let is_last = index + 1 == crumb_count;
-            let separator = (index > 0).then(|| {
-                div()
-                    .text_color(theme.colors.text_placeholder)
-                    .child("/")
-                    .into_any_element()
+        let hover_text = theme.colors.text;
+        let breadcrumbs = crumbs
+            .into_iter()
+            .enumerate()
+            .flat_map(|(index, (page, title))| {
+                let is_last = index + 1 == crumb_count;
+                let separator = (index > 0).then(|| {
+                    div()
+                        .text_color(theme.colors.text_placeholder)
+                        .child("/")
+                        .into_any_element()
+                });
+                let crumb = div()
+                    .id(("crumb", index))
+                    .debug_selector(|| format!("crumb-{index}"))
+                    .ellipsis()
+                    .text_color(if is_last {
+                        theme.colors.text
+                    } else {
+                        theme.colors.text_muted
+                    })
+                    .when(is_last, |crumb| crumb.font_weight(FontWeight::MEDIUM))
+                    .when(!is_last, |crumb| {
+                        crumb
+                            .cursor_pointer()
+                            .hover(move |crumb| crumb.text_color(hover_text))
+                            // Otherwise the press starts moving the window, and no click follows.
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.open_page(page, window, cx)
+                            }))
+                    })
+                    .child(title)
+                    .into_any_element();
+                separator.into_iter().chain(std::iter::once(crumb))
             });
-            let crumb = div()
-                .ellipsis()
-                .text_color(if is_last {
-                    theme.colors.text
-                } else {
-                    theme.colors.text_muted
-                })
-                .when(is_last, |crumb| crumb.font_weight(FontWeight::MEDIUM))
-                .child(title)
-                .into_any_element();
-            separator.into_iter().chain(std::iter::once(crumb))
-        });
         div()
             .flex()
             .flex_none()
