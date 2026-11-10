@@ -56,7 +56,11 @@ pub struct SemanticColors {
     pub focus_ring: Hsla,
     pub accent: Hsla,
     pub accent_hover: Hsla,
-    pub accent_pressed: Hsla,
+    /// Fill for primary buttons. Not the accent: white words on the accent blue are too faint to read.
+    pub primary: Hsla,
+    pub primary_hover: Hsla,
+    pub primary_pressed: Hsla,
+    pub text_on_primary: Hsla,
     pub danger: Hsla,
     pub text_selection: Hsla,
     pub caret: Hsla,

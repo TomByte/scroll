@@ -1,5 +1,6 @@
 //! The app around the window: startup, opening workspaces, the menu bar and quitting.
 
+mod dock_icon;
 pub(crate) mod first_run;
 mod menus;
 mod open;
@@ -72,6 +73,7 @@ pub fn run() {
     });
     application.run(|cx: &mut App| {
         logger::install();
+        dock_icon::show_app_icon();
         match data_directory() {
             Ok(directory) => start(directory, cx),
             Err(error) => {

@@ -22,6 +22,7 @@ serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
 security-framework.workspace = true
+objc.workspace = true
 syntect.workspace = true
 
 [dev-dependencies]

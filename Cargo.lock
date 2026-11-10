@@ -6162,6 +6162,7 @@ dependencies = [
  "gpui",
  "log",
  "loro",
+ "objc",
  "scroll-core",
  "scroll-mcp",
  "scroll-settings",

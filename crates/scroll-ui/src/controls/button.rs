@@ -64,10 +64,10 @@ impl ButtonVariant {
         let colors = &theme.colors;
         match self {
             ButtonVariant::Primary => VariantColors {
-                background: colors.accent,
-                hover: colors.accent_hover,
-                pressed: colors.accent_pressed,
-                text: colors.text_on_accent,
+                background: colors.primary,
+                hover: colors.primary_hover,
+                pressed: colors.primary_pressed,
+                text: colors.text_on_primary,
             },
             ButtonVariant::Secondary => VariantColors {
                 background: colors.control,
