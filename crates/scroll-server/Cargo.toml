@@ -1,0 +1,35 @@
+[package]
+name = "scroll-server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+scroll-core.workspace = true
+scroll-api.workspace = true
+axum.workspace = true
+tokio.workspace = true
+tokio-postgres.workspace = true
+deadpool-postgres.workspace = true
+serde.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+argon2.workspace = true
+sha2.workspace = true
+getrandom.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde_json.workspace = true
+postcard.workspace = true
+futures-util.workspace = true
+jsonwebtoken.workspace = true
+reqwest = { workspace = true, features = ["form", "query", "native-tls"] }
+
+[features]
+# Test helpers shared with other crates' tests; never in a release.
+test-support = ["jsonwebtoken/use_pem"]
+
+[dev-dependencies]
+base64.workspace = true
+scroll-server = { path = ".", features = ["test-support"] }
+tokio-tungstenite.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

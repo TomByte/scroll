@@ -1,0 +1,19 @@
+[package]
+name = "scroll-table"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+scroll-core.workspace = true
+scroll-ui.workspace = true
+gpui.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+
+[[example]]
+name = "table"
+path = "examples/table.rs"

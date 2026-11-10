@@ -1,0 +1,17 @@
+[package]
+name = "scroll-ui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+gpui.workspace = true
+unicode-segmentation.workspace = true
+log.workspace = true
+libc.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+
+[[example]]
+name = "gallery"
+path = "examples/gallery/main.rs"

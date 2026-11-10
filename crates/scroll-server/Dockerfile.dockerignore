@@ -1,0 +1,9 @@
+# Used by BuildKit for builds with crates/scroll-server/Dockerfile; keeps build output and history out of the context.
+.git
+**/.env
+target
+target-*
+**/*.scroll
+**/*.db
+**/*.db-wal
+**/*.db-shm

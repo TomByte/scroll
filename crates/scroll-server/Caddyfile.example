@@ -1,0 +1,8 @@
+# TLS termination for Scroll. Caddy obtains and renews the certificate for the domain on its own, and
+# proxies WebSocket upgrades (the /ws endpoint) without extra settings.
+scroll.example.com {
+	reverse_proxy 127.0.0.1:8080 {
+		# Set, not append: the server takes the last address in this header as the client's, for rate limiting.
+		header_up X-Forwarded-For {remote_host}
+	}
+}

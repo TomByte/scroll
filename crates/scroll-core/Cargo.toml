@@ -1,0 +1,20 @@
+[package]
+name = "scroll-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+loro.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+postcard.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+
+[features]
+# The benchmark workspace generator (`store::fixture`), for examples and other crates' tools.
+fixture = []
+
+[[example]]
+name = "fixture"
+required-features = ["fixture"]

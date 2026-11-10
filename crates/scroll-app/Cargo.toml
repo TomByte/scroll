@@ -1,0 +1,26 @@
+[package]
+name = "scroll-app"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "scroll"
+path = "src/main.rs"
+
+[dependencies]
+scroll-core.workspace = true
+gpui.workspace = true
+scroll-ui.workspace = true
+scroll-table.workspace = true
+scroll-sync.workspace = true
+loro.workspace = true
+thiserror.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+security-framework.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+scroll-core = { workspace = true, features = ["fixture"] }

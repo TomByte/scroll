@@ -1,0 +1,15 @@
+[package]
+name = "scroll-api"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+scroll-core.workspace = true
+serde.workspace = true
+postcard.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+base64.workspace = true
+
+[dev-dependencies]
+serde_urlencoded.workspace = true

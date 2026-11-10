@@ -1,0 +1,65 @@
+# Scroll's server and its Postgres, for self-hosting. Put a TLS-terminating proxy in front (see Caddyfile.example).
+# Settings come from crates/scroll-server/.env; see the README.
+#   docker compose -f crates/scroll-server/docker-compose.yml up -d --build                  # behind your own proxy
+#   docker compose -f crates/scroll-server/docker-compose.yml --profile tls up -d --build    # with Caddy for HTTPS
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: scroll
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: scroll
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "scroll", "-d", "scroll"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  scroll-server:
+    build:
+      context: ../..
+      dockerfile: crates/scroll-server/Dockerfile
+    image: scroll-server
+    # Settings left out of .env reach the server empty, which it treats as unset: the defaults are the server's
+    # own (README). The image sets BIND_ADDR to listen on all interfaces.
+    environment:
+      DATABASE_URL: postgres://scroll:${POSTGRES_PASSWORD}@postgres:5432/scroll
+      # The proxy in front sets this header to the client's address.
+      CLIENT_IP_HEADER: x-forwarded-for
+      SERVER_NAME: ${SERVER_NAME:-}
+      SIGN_UP: ${SIGN_UP:-}
+      # All three, or none for no Google sign-in.
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      PAGE_COMPACTION_THRESHOLD: ${PAGE_COMPACTION_THRESHOLD:-}
+      RUST_LOG: ${RUST_LOG:-}
+    ports:
+      # Only the proxy on this machine should reach the server.
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # HTTPS for one domain with a certificate from Let's Encrypt; DOMAIN must point at this machine.
+  caddy:
+    image: caddy:2
+    profiles: ["tls"]
+    command: caddy reverse-proxy --from ${DOMAIN:-} --to scroll-server:8080
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-data:/data
+    depends_on:
+      - scroll-server
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  caddy-data:
