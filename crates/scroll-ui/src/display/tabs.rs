@@ -11,6 +11,7 @@ use crate::controls::icon_button::IconButton;
 use crate::controls::text_input::TextInput;
 use crate::display::icon::IconName;
 use crate::foundation::focus::Clickable;
+use crate::motion::Transition;
 use crate::theme::Theme;
 
 type TabHandler = Rc<dyn Fn(&usize, &mut Window, &mut App) + 'static>;
@@ -110,6 +111,8 @@ impl RenderOnce for Tabs {
                 let on_select = self.on_select.clone();
                 let on_double_click = self.on_double_click.clone();
                 let on_secondary = self.on_secondary_mouse_down.clone();
+                let selected_amount =
+                    Transition::Select.fraction_on(id.clone(), is_current, window, cx);
                 div()
                     .id(id)
                     .flex()
@@ -128,7 +131,9 @@ impl RenderOnce for Tabs {
                     } else {
                         theme.colors.text_muted
                     })
-                    .when(is_current, |tab| tab.bg(theme.colors.selected))
+                    .when(selected_amount > 0.0, |tab| {
+                        tab.bg(theme.colors.selected.opacity(selected_amount))
+                    })
                     .child(label)
                     .map(|tab| {
                         Clickable::new(theme.radius.md)

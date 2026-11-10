@@ -3,6 +3,7 @@ use gpui::{
     SharedString, Styled, Window, div,
 };
 
+use crate::motion::{Motion, MotionExt};
 use crate::theme::Theme;
 
 /// A small label shown on hover. Use with GPUI's `.tooltip(Tooltip::text("…"))`.
@@ -41,6 +42,7 @@ impl Render for Tooltip {
                     .shadow(theme.shadow.raised.clone())
                     .child(self.text.clone()),
             )
+            .motion("tooltip", Motion::FadeIn, window, cx)
     }
 }
 

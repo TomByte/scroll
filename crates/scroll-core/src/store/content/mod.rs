@@ -115,6 +115,13 @@ impl WorkspaceStore {
         tx.commit()?;
         Ok(())
     }
+
+    /// Re-indexes the page's text for search, local updates still waiting for the server
+    /// included. For a writer that must not compact: in a linked workspace the sync engine owns
+    /// the stored log, and compacting leaves queued updates out of the index.
+    pub fn refresh_page_search(&self, page_id: PageId) -> Result<(), StoreError> {
+        refresh_search_body(&self.conn, page_id)
+    }
 }
 
 fn page_doc_with_queued_updates(conn: &Connection, page_id: PageId) -> Result<PageDoc, StoreError> {

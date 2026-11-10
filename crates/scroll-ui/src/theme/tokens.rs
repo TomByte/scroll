@@ -123,6 +123,9 @@ pub struct Sizes {
     pub row_height: Pixels,
     pub tree_indent: Pixels,
     pub checkbox: Pixels,
+    /// An on/off switch's track; its knob fills the track's height less a small inset.
+    pub switch_width: Pixels,
+    pub switch_height: Pixels,
     pub border_width: Pixels,
     pub focus_ring_width: Pixels,
     pub caret_width: Pixels,

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/scroll-core", "crates/scroll-ui", "crates/scroll-app", "crates/scroll-server", "crates/scroll-table", "crates/scroll-sync", "crates/scroll-api"]
+members = ["crates/scroll-core", "crates/scroll-ui", "crates/scroll-app", "crates/scroll-server", "crates/scroll-table", "crates/scroll-sync", "crates/scroll-api", "crates/scroll-settings", "crates/scroll-mcp"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,6 +10,8 @@ edition = "2024"
 scroll-core = { path = "crates/scroll-core" }
 scroll-api = { path = "crates/scroll-api" }
 scroll-ui = { path = "crates/scroll-ui" }
+scroll-settings = { path = "crates/scroll-settings" }
+scroll-mcp = { path = "crates/scroll-mcp" }
 loro = "1.17"
 rusqlite = { version = "0.41", features = ["bundled", "uuid", "fallible_uint"] }
 serde = { version = "1", features = ["derive"] }

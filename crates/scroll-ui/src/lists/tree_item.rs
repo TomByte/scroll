@@ -1,11 +1,14 @@
+use std::f32::consts::FRAC_PI_2;
+
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, MouseDownEvent,
     ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
-    prelude::FluentBuilder,
+    prelude::FluentBuilder, radians,
 };
 
 use crate::display::icon::{Icon, IconName, IconSize};
 use crate::lists::list_item::ListItem;
+use crate::motion::Transition;
 use crate::theme::Theme;
 use crate::{ClickHandler, MouseDownHandler};
 use gpui::{AnyView, AppContext, Context, Entity, Render};
@@ -122,12 +125,19 @@ impl TreeItem {
 impl RenderOnce for TreeItem {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::current(window, cx);
+        let chevron_id = ElementId::Name(format!("{}-disclosure", self.id).into());
+        let is_expanded = self.disclosure == Disclosure::Expanded;
+        let expanded_amount =
+            Transition::Toggle.fraction_on(chevron_id.clone(), is_expanded, window, cx);
+        let is_turning = expanded_amount > 0.0 && expanded_amount < 1.0;
         let chevron_icon = match self.disclosure {
             Disclosure::Leaf => None,
-            Disclosure::Collapsed => Some(IconName::ChevronRight),
-            Disclosure::Expanded => Some(IconName::ChevronDown),
+            _ if is_turning => {
+                Some(Icon::new(IconName::ChevronRight).rotate(radians(FRAC_PI_2 * expanded_amount)))
+            }
+            Disclosure::Collapsed => Some(Icon::new(IconName::ChevronRight)),
+            Disclosure::Expanded => Some(Icon::new(IconName::ChevronDown)),
         };
-        let chevron_id = ElementId::Name(format!("{}-disclosure", self.id).into());
         let chevron = div()
             .id(chevron_id)
             .flex()
@@ -138,8 +148,7 @@ impl RenderOnce for TreeItem {
             .rounded(theme.radius.sm)
             .when_some(chevron_icon, |chevron, icon| {
                 chevron.hover(|style| style.bg(theme.colors.hover)).child(
-                    Icon::new(icon)
-                        .size(IconSize::XSmall)
+                    icon.size(IconSize::XSmall)
                         .color(theme.colors.text_placeholder),
                 )
             })

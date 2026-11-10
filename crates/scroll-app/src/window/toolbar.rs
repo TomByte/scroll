@@ -9,7 +9,7 @@ use crate::window::commands::{GO_BACK, GO_FORWARD};
 use crate::workspace::page_tree::labelled_title;
 use crate::workspace::sync_state::SyncState;
 use gpui::{
-    AnyElement, Context, FontWeight, IntoElement, ParentElement, Styled, div,
+    AnyElement, Context, FontWeight, IntoElement, ParentElement, Pixels, Styled, div,
     prelude::FluentBuilder,
 };
 use scroll_ui::{
@@ -23,7 +23,14 @@ use super::*;
 const PUBLISHING: &str = "Publishing — preparing pages and records…";
 
 impl AppWindow {
-    pub(super) fn render_toolbar(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+    /// `sidebar_width` is how much of the sidebar shows beside the toolbar, which changes as
+    /// the sidebar slides open or closed.
+    pub(super) fn render_toolbar(
+        &self,
+        theme: &Theme,
+        sidebar_width: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let tree = self.workspace.read(cx).tree();
         let crumbs: Vec<String> = self
             .current_page()
@@ -61,10 +68,8 @@ impl AppWindow {
             .gap(theme.spacing.xs)
             .h(title_bar::height(theme))
             .px(theme.spacing.md)
-            // Without the sidebar the traffic lights sit over the toolbar.
-            .when(!self.is_sidebar_open, |toolbar| {
-                toolbar.pl(TRAFFIC_LIGHTS_WIDTH)
-            })
+            // Where the sidebar does not cover them, the traffic lights sit over the toolbar.
+            .pl((TRAFFIC_LIGHTS_WIDTH - sidebar_width).max(theme.spacing.md))
             .text_size(theme.text.ui.size)
             .child(
                 IconButton::new("back", IconName::ArrowLeft)

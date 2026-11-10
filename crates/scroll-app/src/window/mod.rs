@@ -18,6 +18,7 @@ use gpui::{
     Render, SharedString, Styled, Subscription, Window, WindowBounds, div, prelude::FluentBuilder,
 };
 use scroll_core::id::PageId;
+use scroll_settings::Settings;
 use scroll_ui::theme::{
     follow_system_appearance, follow_system_in_window, force_window_appearance,
 };
@@ -32,7 +33,7 @@ use crate::page::{PageView, PageViewEvent};
 use crate::sidebar::{Sidebar, SidebarEvent};
 use crate::sync_status::empty_text;
 use crate::window::history::History;
-use crate::window::settings::{AppSettings, ThemePreference, WindowFrame};
+use crate::window::settings::{AppSettings, THEME, ThemePreference, WindowFrame};
 use crate::workspace::page_tree::labelled_title;
 use crate::workspace::settings::WorkspaceSettings;
 use crate::workspace::{Workspace, WorkspaceEvent};
@@ -82,6 +83,9 @@ impl AppWindow {
             cx.observe_global::<Accounts>(|_, cx| cx.notify()),
             cx.observe_window_bounds(window, |this, window, _| this.remember_window_frame(window)),
             follow_system_appearance(window),
+            cx.observe_global_in::<Settings>(window, |this, window, cx| {
+                this.apply_theme(window, cx)
+            }),
         ];
         let mut app_window = AppWindow {
             window_handle: window.window_handle(),
@@ -326,19 +330,8 @@ impl AppWindow {
         cx.notify();
     }
 
-    fn set_theme(
-        &mut self,
-        preference: ThemePreference,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.settings.theme = preference;
-        self.apply_theme(window, cx);
-        self.save_settings(cx);
-    }
-
     fn apply_theme(&self, window: &mut Window, cx: &mut Context<Self>) {
-        match self.settings.theme {
+        match THEME.get(cx) {
             ThemePreference::System => follow_system_in_window(window, cx),
             ThemePreference::Light => force_window_appearance(Appearance::Light, window, cx),
             ThemePreference::Dark => force_window_appearance(Appearance::Dark, window, cx),
@@ -371,19 +364,6 @@ impl AppWindow {
             .detach();
     }
 
-    /// Writes the settings off the main thread.
-    pub fn save_settings(&self, cx: &mut Context<Self>) {
-        let settings = self.settings.clone();
-        let directory = self.data_directory.clone();
-        cx.background_executor()
-            .spawn(async move {
-                if let Err(error) = settings.save(&directory) {
-                    log::error!("could not save settings: {error}");
-                }
-            })
-            .detach();
-    }
-
     /// Called on quit, before storage drains: settings go to disk now, and the open page's
     /// edits are queued for compaction so search and the file are up to date.
     pub fn prepare_to_quit(&self, cx: &mut gpui::App) {
@@ -402,7 +382,16 @@ impl AppWindow {
 impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::current(window, cx);
-        let toolbar = self.render_toolbar(&theme, cx);
+        let sidebar_shown =
+            scroll_ui::Transition::Sidebar.fraction_on("sidebar", self.is_sidebar_open, window, cx);
+        let sidebar_width = crate::sidebar::SIDEBAR_WIDTH * sidebar_shown;
+        let page_shown = scroll_ui::Transition::Page.progress(
+            "page-content",
+            self.page.as_ref().map(Entity::entity_id),
+            window,
+            cx,
+        );
+        let toolbar = self.render_toolbar(&theme, sidebar_width, cx);
         let content = match self.page.as_ref() {
             Some(page) => page.clone().into_any_element(),
             None => {
@@ -428,8 +417,18 @@ impl Render for AppWindow {
                 };
                 this.run_command(command.id, target, window, cx)
             }))
-            .when(self.is_sidebar_open, |root| {
-                root.child(self.sidebar.clone())
+            .when(sidebar_shown > 0.0, |root| {
+                // The sidebar keeps its width and slides out from under this clip.
+                root.child(
+                    div()
+                        .flex()
+                        .flex_none()
+                        .justify_end()
+                        .h_full()
+                        .w(sidebar_width)
+                        .overflow_hidden()
+                        .child(self.sidebar.clone()),
+                )
             })
             .child(
                 div()
@@ -439,7 +438,13 @@ impl Render for AppWindow {
                     .min_w_0()
                     .h_full()
                     .child(toolbar)
-                    .child(div().flex_1().min_h_0().child(content)),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .when(page_shown < 1.0, |page| page.opacity(page_shown))
+                            .child(content),
+                    ),
             )
             .children(self.overlays.layers())
     }

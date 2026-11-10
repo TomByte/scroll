@@ -3,6 +3,10 @@
 use std::path::PathBuf;
 
 const APP_DIRECTORY: &str = "Scroll";
+/// The preferences the settings page shows (`scroll_settings`).
+pub const PREFERENCES_FILE: &str = "preferences.json";
+/// The secret AI tools present to the MCP server; readable by this user only.
+pub const MCP_TOKEN_FILE: &str = "mcp-token";
 
 /// `~/Library/Application Support/Scroll`, created if missing.
 pub fn data_directory() -> std::io::Result<PathBuf> {

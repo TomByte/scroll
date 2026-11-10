@@ -1,0 +1,14 @@
+[package]
+name = "scroll-mcp"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+scroll-core.workspace = true
+axum.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+log.workspace = true
+getrandom.workspace = true

@@ -9,11 +9,16 @@ pub(super) fn set_menus(cx: &mut App) {
         items: commands::menu_items(crate::window::command_list::all(), menu),
     };
     let mut app_menu = menu("Scroll", MenuName::App);
-    app_menu.items.insert(
-        0,
-        MenuItem::os_submenu("Services", SystemMenuType::Services),
+    // In the order macOS apps use: Settings…, then Services, then Quit, the list's last.
+    let quit = app_menu.items.len().saturating_sub(1);
+    app_menu.items.splice(
+        quit..quit,
+        [
+            MenuItem::separator(),
+            MenuItem::os_submenu("Services", SystemMenuType::Services),
+            MenuItem::separator(),
+        ],
     );
-    app_menu.items.insert(1, MenuItem::separator());
     cx.set_menus(vec![
         app_menu,
         menu("File", MenuName::File),

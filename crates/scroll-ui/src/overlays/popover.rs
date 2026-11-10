@@ -6,6 +6,7 @@ use gpui::{
 };
 
 use crate::foundation::actions::{Cancel, POPOVER_CONTEXT};
+use crate::motion::{Motion, MotionExt};
 use crate::theme::Theme;
 use gpui::{AnyView, AppContext, ClickEvent, Context, Render};
 
@@ -63,6 +64,10 @@ impl ParentElement for Popover {
 impl RenderOnce for Popover {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = Theme::current(window, cx);
+        let entrance = match self.anchor {
+            Corner::TopLeft | Corner::TopRight => Motion::DropIn,
+            Corner::BottomLeft | Corner::BottomRight => Motion::RiseIn,
+        };
         let panel = div()
             .key_context(POPOVER_CONTEXT)
             .occlude()
@@ -85,7 +90,8 @@ impl RenderOnce for Popover {
                     .on_action(move |_: &Cancel, window, cx| on_escape(window, cx))
                     .on_mouse_down_out(move |_, window, cx| on_dismiss(window, cx))
             })
-            .children(self.children);
+            .children(self.children)
+            .motion("popover", entrance, window, cx);
 
         deferred(
             anchored()

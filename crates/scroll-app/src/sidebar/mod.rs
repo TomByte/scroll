@@ -19,7 +19,7 @@ use scroll_core::id::{PageId, TagId};
 use scroll_core::record::Page;
 use scroll_ui::{
     EmptyState, Icon, IconName, IconSize, ListItem, Menu, MenuItem, PopupAnchor, PopupHost,
-    Scrollbar, SectionHeader, TextInput, TextInputEvent, Theme, TitlebarDragArea,
+    Scrollbar, SectionHeader, TextInput, TextInputEvent, Theme, TitlebarDragArea, Transition,
 };
 
 use crate::accounts::switcher::{current_workspace_name, switcher_menu};
@@ -59,6 +59,8 @@ pub struct Sidebar {
     overlays: Overlays,
     workspace: Entity<Workspace>,
     expanded: HashSet<PageId>,
+    /// The parent last opened by hand, whose rows fade in as they appear.
+    revealed: Option<PageId>,
     current_page: Option<PageId>,
     renaming: Option<Renaming>,
     popups: Entity<PopupHost>,
@@ -120,6 +122,7 @@ impl Sidebar {
             overlays,
             workspace,
             expanded,
+            revealed: None,
             current_page: None,
             renaming: None,
             popups: cx.new(|_| PopupHost::new()),
@@ -204,13 +207,21 @@ impl Sidebar {
     }
 
     fn toggle_expanded(&mut self, page: PageId, cx: &mut Context<Self>) {
+        self.revealed = None;
         if !self.expanded.remove(&page) {
             self.expanded.insert(page);
+            self.revealed = Some(page);
             self.load_expanded_children(cx);
         }
         self.rows = None;
         cx.emit(SidebarEvent::ExpandedChanged);
         cx.notify();
+    }
+
+    /// Whether `page` is one of the rows that appeared when `parent` opened.
+    fn is_revealed_by(&self, page: PageId, parent: PageId, cx: &App) -> bool {
+        let ancestors = self.workspace.read(cx).tree().ancestors_and_self(page);
+        ancestors.iter().skip(1).any(|ancestor| *ancestor == parent)
     }
 
     fn open_switcher(
@@ -347,6 +358,8 @@ impl Render for Sidebar {
         let rows = self.rows(cx);
         let row_count = rows.len();
         let list_theme = theme.clone();
+        let reveal = Transition::Reveal.progress("page-tree-reveal", self.revealed, window, cx);
+        let revealing = self.revealed.filter(|_| reveal < 1.0);
         let trash = self.render_trash(&theme, cx);
         let tag_rows = self.render_tags(&theme, cx);
         div()
@@ -439,7 +452,15 @@ impl Render for Sidebar {
                             cx.processor(move |sidebar, range: std::ops::Range<usize>, _, cx| {
                                 range
                                     .filter_map(|index| rows.get(index).copied())
-                                    .map(|row| sidebar.render_row(&row, &list_theme, cx))
+                                    .map(|row| {
+                                        let is_revealing = revealing.is_some_and(|parent| {
+                                            sidebar.is_revealed_by(row.id, parent, cx)
+                                        });
+                                        sidebar
+                                            .render_row(&row, &list_theme, cx)
+                                            .when(is_revealing, |row| row.opacity(reveal))
+                                            .into_any_element()
+                                    })
                                     .collect::<Vec<_>>()
                             }),
                         )

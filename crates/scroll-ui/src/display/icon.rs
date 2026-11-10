@@ -1,4 +1,7 @@
-use gpui::{App, Hsla, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div, svg};
+use gpui::{
+    App, Hsla, IntoElement, ParentElement, Pixels, Radians, RenderOnce, Styled, Transformation,
+    Window, div, prelude::FluentBuilder, svg,
+};
 
 use crate::foundation::story::stateless_story;
 use crate::theme::Theme;
@@ -91,6 +94,7 @@ pub struct Icon {
     name: IconName,
     size: IconSize,
     color: Option<Hsla>,
+    rotation: Option<Radians>,
 }
 
 impl Icon {
@@ -99,6 +103,7 @@ impl Icon {
             name,
             size: IconSize::default(),
             color: None,
+            rotation: None,
         }
     }
 
@@ -112,6 +117,12 @@ impl Icon {
         self.color = Some(color);
         self
     }
+
+    /// Turns the icon clockwise about its centre, e.g. a chevron opening.
+    pub fn rotate(mut self, angle: Radians) -> Self {
+        self.rotation = Some(angle);
+        self
+    }
 }
 
 impl RenderOnce for Icon {
@@ -123,6 +134,9 @@ impl RenderOnce for Icon {
             .flex_none()
             .size(size)
             .text_color(self.color.unwrap_or(theme.colors.icon))
+            .when_some(self.rotation, |icon, angle| {
+                icon.with_transformation(Transformation::rotate(angle))
+            })
     }
 }
 

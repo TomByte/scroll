@@ -6143,6 +6143,8 @@ dependencies = [
  "log",
  "loro",
  "scroll-core",
+ "scroll-mcp",
+ "scroll-settings",
  "scroll-sync",
  "scroll-table",
  "scroll-ui",
@@ -6163,6 +6165,20 @@ dependencies = [
  "serde",
  "thiserror 2.0.21",
  "uuid",
+]
+
+[[package]]
+name = "scroll-mcp"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "getrandom 0.4.3",
+ "log",
+ "scroll-core",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]
@@ -6191,6 +6207,15 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+]
+
+[[package]]
+name = "scroll-settings"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "log",
+ "serde_json",
 ]
 
 [[package]]

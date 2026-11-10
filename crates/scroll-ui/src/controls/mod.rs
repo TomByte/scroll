@@ -5,4 +5,5 @@ pub mod field_error;
 pub mod form_field;
 pub mod icon_button;
 pub mod segmented_control;
+pub mod switch;
 pub mod text_input;

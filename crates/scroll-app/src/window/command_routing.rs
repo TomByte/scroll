@@ -4,9 +4,12 @@ use self::commands::WindowCommand;
 use crate::accounts::commands::AccountRequest;
 use crate::accounts::{Accounts, OpenWorkspace, flows, request_open_workspace};
 use crate::commands::{PageKind, Run, Situation, Surface, Target};
+use crate::mcp::CopyConnectionCommand;
 use crate::page::commands::{PageCommand, RenamePage};
 use crate::palette::commands::OpenPalette;
 use crate::palette::{CommandPalette, PaletteEvent, PaletteSetup};
+use crate::settings::{OpenSettings, SettingsPage};
+use crate::window::settings::THEME;
 use gpui::{Context, Window};
 use scroll_core::id::PageId;
 
@@ -114,6 +117,16 @@ impl AppWindow {
         if let Some(open) = action.downcast_ref::<OpenWorkspace>() {
             return request_open_workspace(open.index, cx);
         }
+        if action.is::<OpenSettings>() {
+            self.overlays.show_modal(SettingsPage::new, window, cx);
+            return;
+        }
+        if action.is::<CopyConnectionCommand>() {
+            return match crate::mcp::copy_connection_command(cx) {
+                Ok(()) => self.show_toast("Copied", cx),
+                Err(error) => self.show_toast(error.to_string(), cx),
+            };
+        }
         log::warn!("the window has no handler for {name}");
     }
 
@@ -127,7 +140,7 @@ impl AppWindow {
             WindowCommand::GoBack => self.go_back(window, cx),
             WindowCommand::GoForward => self.go_forward(window, cx),
             WindowCommand::ToggleSidebar => self.toggle_sidebar(cx),
-            WindowCommand::Theme(preference) => self.set_theme(*preference, window, cx),
+            WindowCommand::Theme(preference) => THEME.set(*preference, cx),
             WindowCommand::Close => window.remove_window(),
             WindowCommand::Quit => cx.quit(),
         }

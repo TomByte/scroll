@@ -14,9 +14,9 @@ use gpui::{AnyWindowHandle, App, Application, Entity, Global, WeakEntity};
 use crate::accounts::registry::Registry;
 use crate::accounts::{self, Accounts, OpenWorkspace};
 use crate::commands::{self, RunCommand};
-use crate::window::{AppWindow, command_list};
+use crate::window::{AppWindow, command_list, settings};
 use crate::workspace::Workspace;
-use crate::{editor, logger};
+use crate::{editor, logger, mcp};
 use paths::data_directory;
 
 /// The windows the app has open. Lives as long as the app.
@@ -100,6 +100,7 @@ pub fn start(data_directory: PathBuf, cx: &mut App) {
     })
     .detach();
     cx.set_global(AppState::default());
+    scroll_settings::init(data_directory.join(paths::PREFERENCES_FILE), cx);
     let loading = Instant::now();
     let registry = match Registry::load(&data_directory) {
         Ok(registry) => registry,
@@ -123,19 +124,24 @@ pub fn start(data_directory: PathBuf, cx: &mut App) {
     );
 }
 
-/// Themes, key bindings and the menu bar.
+/// Themes, settings, key bindings and the menu bar.
 fn set_up_ui(cx: &mut App) {
     let initialising = Instant::now();
     scroll_ui::init(cx);
     scroll_table::init(cx);
     editor::init(cx);
+    scroll_settings::register(settings::SETTINGS, cx);
+    scroll_settings::register(mcp::SETTINGS, cx);
+    settings::follow_motion(cx);
+    mcp::init(cx);
     commands::bind_keys(command_list::all(), cx);
     menus::set_menus(cx);
     log::debug!("timing: UI set up in {:?}", initialising.elapsed());
 }
 
-/// Saves settings and drains the storage queue so no edit is lost on quit.
+/// Stops the MCP server, saves settings and drains the storage queue so no edit is lost on quit.
 fn prepare_to_quit(cx: &mut App) {
+    mcp::stop(cx);
     if let Some(window) = AppState::window(cx) {
         window.update(cx, |window, cx| window.prepare_to_quit(cx));
     }

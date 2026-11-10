@@ -18,6 +18,7 @@ const STORIES: &[(&str, StoryBuilder)] = &[
     ("Button", Button::story),
     ("IconButton", IconButton::story),
     ("Checkbox", Checkbox::story),
+    ("Switch", Switch::story),
     ("SegmentedControl", SegmentedControl::story),
     ("TextInput", TextInput::story),
     ("FormField", FormField::story),
@@ -50,6 +51,7 @@ const STORIES: &[(&str, StoryBuilder)] = &[
     ("Dialog", Dialog::story),
     ("ModalLayer", ModalLayer::story),
     ("EmojiPicker", EmojiPicker::story),
+    ("Motion", motion::story),
 ];
 
 actions!(gallery, [Quit]);

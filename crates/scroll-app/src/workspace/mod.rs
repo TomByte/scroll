@@ -4,6 +4,7 @@
 
 mod loading;
 mod maintenance;
+mod mcp;
 pub mod page_tree;
 pub mod presence;
 pub mod records;

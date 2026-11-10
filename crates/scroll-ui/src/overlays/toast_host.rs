@@ -6,6 +6,7 @@ use gpui::{
 };
 
 use crate::controls::button::Button;
+use crate::motion::{self, Motion, MotionExt, MotionPreference};
 use crate::overlays::toast::Toast;
 use crate::theme::Theme;
 
@@ -15,6 +16,8 @@ const TOAST_DURATION: Duration = Duration::from_secs(5);
 /// as the last child of a full-size, relatively positioned root.
 pub struct ToastHost {
     message: Option<SharedString>,
+    /// The notice is fading out and goes once the fade is done.
+    is_leaving: bool,
     hide: Task<()>,
 }
 
@@ -22,6 +25,7 @@ impl ToastHost {
     pub fn new() -> Self {
         ToastHost {
             message: None,
+            is_leaving: false,
             hide: Task::ready(()),
         }
     }
@@ -29,13 +33,25 @@ impl ToastHost {
     /// Shows `message`, replacing any notice already up.
     pub fn show(&mut self, message: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.message = Some(message.into());
+        self.is_leaving = false;
+        let fade_out =
+            (motion::preference(cx) == MotionPreference::Full).then(|| Motion::FadeOut.duration());
         self.hide = cx.spawn(async move |host, cx| {
-            cx.background_executor().timer(TOAST_DURATION).await;
-            let hidden = host.update(cx, |host, cx| {
-                host.message = None;
-                cx.notify();
-            });
-            if let Err(error) = hidden {
+            let hidden = async {
+                cx.background_executor().timer(TOAST_DURATION).await;
+                if let Some(fade_out) = fade_out {
+                    host.update(cx, |host, cx| {
+                        host.is_leaving = true;
+                        cx.notify();
+                    })?;
+                    cx.background_executor().timer(fade_out).await;
+                }
+                host.update(cx, |host, cx| {
+                    host.message = None;
+                    cx.notify();
+                })
+            };
+            if let Err(error) = hidden.await {
                 log::debug!("window closed before its notice expired: {error}");
             }
         });
@@ -57,6 +73,11 @@ impl Default for ToastHost {
 impl Render for ToastHost {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::current(window, cx);
+        let (key, toast_motion) = if self.is_leaving {
+            ("toast-leaving", Motion::FadeOut)
+        } else {
+            ("toast", Motion::RiseIn)
+        };
         div().when_some(self.message.clone(), |host, message| {
             host.absolute()
                 .bottom(theme.spacing.xl)
@@ -64,7 +85,11 @@ impl Render for ToastHost {
                 .right_0()
                 .flex()
                 .justify_center()
-                .child(Toast::new(message))
+                .child(
+                    div()
+                        .motion(key, toast_motion, window, cx)
+                        .child(Toast::new(message)),
+                )
         })
     }
 }
@@ -119,6 +144,11 @@ mod tests {
             "a newer notice gets its own full time"
         );
         cx.executor().advance_clock(TOAST_DURATION);
+        assert!(
+            host.read_with(cx, |host, _| host.is_leaving),
+            "it fades out before it goes"
+        );
+        cx.executor().advance_clock(Motion::FadeOut.duration());
         assert_eq!(host.read_with(cx, |host, _| host.message().cloned()), None);
     }
 

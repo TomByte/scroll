@@ -190,3 +190,91 @@ fn a_read_only_refusal_makes_everything_read_only_across_a_reconnect(cx: &mut Te
         "a reconnect keeps it read-only"
     );
 }
+
+#[gpui::test]
+fn the_settings_page_opens_with_cmd_comma_and_the_window_follows_its_theme(
+    cx: &mut TestAppContext,
+) {
+    use crate::window::settings::{SETTINGS, THEME, ThemePreference};
+    use scroll_ui::{Appearance, Theme};
+
+    let (_app, _workspace, cx) = open_app(cx);
+    cx.update(|_, cx| scroll_settings::register(SETTINGS, cx));
+    let appearance =
+        |cx: &mut VisualTestContext| cx.update(|window, cx| Theme::current(window, cx).appearance);
+
+    cx.simulate_keystrokes("cmd-,");
+    cx.run_until_parked();
+    // The page's first control is the theme's first option, "System"; the next is "Light".
+    cx.simulate_keystrokes("tab tab");
+    cx.simulate_keystrokes("space");
+    cx.simulate_event(gpui::KeyUpEvent {
+        keystroke: gpui::Keystroke::parse("space").unwrap(),
+    });
+    cx.run_until_parked();
+    assert_eq!(cx.update(|_, cx| THEME.get(cx)), ThemePreference::Light);
+    assert_eq!(appearance(cx), Appearance::Light);
+
+    cx.simulate_keystrokes("escape");
+    cx.dispatch_action(commands::RunCommand {
+        id: "view.theme_dark",
+        page: None,
+    });
+    cx.run_until_parked();
+    assert_eq!(cx.update(|_, cx| THEME.get(cx)), ThemePreference::Dark);
+    assert_eq!(appearance(cx), Appearance::Dark);
+}
+
+#[gpui::test]
+fn what_an_ai_tool_writes_shows_in_the_window(cx: &mut TestAppContext) {
+    use scroll_core::operation::Transaction;
+    use scroll_core::page_doc::{BlockKind, BlockPlacement};
+    use scroll_core::store::WorkspaceStore;
+    use scroll_mcp::McpEvent;
+
+    use crate::workspace::{PageSyncEvent, WorkspaceEvent};
+
+    let (app, workspace, cx) = open_app(cx);
+    cx.run_until_parked();
+    let page = app.read_with(cx, |app, _| app.current_page()).unwrap();
+    let delivered = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let heard = delivered.clone();
+    let _subscription = cx.update(|_, cx| {
+        cx.subscribe(&workspace, move |_, event: &WorkspaceEvent, _| {
+            if let WorkspaceEvent::Page(page, PageSyncEvent::Updates(updates)) = event {
+                heard.borrow_mut().push((*page, updates.len()));
+            }
+        })
+    });
+    let flushed = workspace.read_with(cx, |workspace, cx| workspace.flushed(cx));
+    cx.background_executor.block(flushed).unwrap();
+
+    // The MCP server's own connection renames the open page and adds a block to it.
+    let path = workspace.read_with(cx, |workspace, _| workspace.path().clone());
+    let mut tool_store = WorkspaceStore::open(&path).unwrap();
+    let renamed = tool_store
+        .apply_local_transaction(&Transaction::set_title(page, "Renamed by an AI"))
+        .unwrap();
+    let mut doc = tool_store.load_page_doc(page).unwrap();
+    doc.insert_block(BlockPlacement::LastChildOf(None), BlockKind::Paragraph)
+        .unwrap();
+    let update = doc.take_local_update().unwrap().unwrap();
+    tool_store.record_local_page_update(page, &update).unwrap();
+
+    workspace.update(cx, |workspace, cx| {
+        workspace.mcp_changed(McpEvent::RecordsChanged(renamed), cx);
+        workspace.mcp_changed(
+            McpEvent::PageContentChanged {
+                page_id: page,
+                update,
+            },
+            cx,
+        );
+    });
+    cx.executor()
+        .advance_clock(std::time::Duration::from_millis(200));
+    cx.run_until_parked();
+
+    assert_eq!(current_title(&app, &workspace, cx), "Renamed by an AI");
+    assert_eq!(*delivered.borrow(), vec![(page, 1)]);
+}

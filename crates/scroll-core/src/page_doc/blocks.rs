@@ -26,7 +26,7 @@ pub enum BlockKind {
 }
 
 impl BlockKind {
-    const ALL: [BlockKind; 11] = [
+    pub const ALL: [BlockKind; 11] = [
         BlockKind::Paragraph,
         BlockKind::Heading1,
         BlockKind::Heading2,
@@ -41,7 +41,7 @@ impl BlockKind {
     ];
 
     /// Stored in the document, so these strings must never change.
-    fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             BlockKind::Paragraph => "paragraph",
             BlockKind::Heading1 => "heading_1",

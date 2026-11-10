@@ -249,6 +249,8 @@ fn sizes() -> Sizes {
         row_height: px(28.0),
         tree_indent: px(14.0),
         checkbox: px(14.0),
+        switch_width: px(26.0),
+        switch_height: px(16.0),
         border_width: px(1.0),
         focus_ring_width: px(3.0),
         caret_width: px(1.5),

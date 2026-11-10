@@ -3,8 +3,8 @@
 use crate::page::commands::NEW_SUB_PAGE;
 use crate::workspace::page_tree::{PageDrop, TreeRow, display_title};
 use gpui::{
-    AnyElement, AppContext, Context, DragMoveEvent, ElementId, InteractiveElement, IntoElement,
-    ParentElement, SharedString, StatefulInteractiveElement, Styled, div, prelude::FluentBuilder,
+    AppContext, Context, Div, DragMoveEvent, ElementId, InteractiveElement, ParentElement,
+    SharedString, Stateful, StatefulInteractiveElement, Styled, div, prelude::FluentBuilder,
 };
 use scroll_core::id::PageId;
 use scroll_ui::{
@@ -19,7 +19,7 @@ impl Sidebar {
         row: &TreeRow,
         theme: &Theme,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Stateful<Div> {
         let page = row.id;
         // Viewers can open pages but not add, move or rename them.
         let can_edit = !self.workspace.read(cx).is_read_only();
@@ -142,7 +142,6 @@ impl Sidebar {
                 PageDrop::After(_) => row.child(DropIndicator::below().inset(indicator_inset)),
                 PageDrop::Inside(_) => row,
             })
-            .into_any_element()
     }
 
     /// Top quarter drops before, bottom quarter after, the middle inside.

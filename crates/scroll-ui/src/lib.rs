@@ -20,6 +20,9 @@
 //!    - if it is a popup (a menu, picker or panel), a plain focusable view that emits
 //!      `DismissEvent` when it is done: `PopupHost::show` draws it in a `Popover` at its
 //!      anchor and closes it on a click outside or Escape, so it takes no position;
+//!    - if it animates, an entrance (`.motion(id, Motion::…, window, cx)`) or a change
+//!      (`Transition::…`) from `motion/`, which own every duration and easing and honour
+//!      reduced motion;
 //!    - if it has key bindings: actions, a `pub(crate)` key context const in
 //!      `foundation/actions.rs` (or beside the component), and a `bind_keys(cx)` called from
 //!      `init` below;
@@ -34,6 +37,7 @@ mod display;
 pub mod emoji;
 mod foundation;
 mod lists;
+pub mod motion;
 mod overlays;
 pub mod text;
 pub mod theme;
@@ -45,6 +49,7 @@ pub use controls::field_error::FieldError;
 pub use controls::form_field::FormField;
 pub use controls::icon_button::IconButton;
 pub use controls::segmented_control::SegmentedControl;
+pub use controls::switch::Switch;
 pub use controls::text_input::{InputAccess, TextInput, TextInputEvent};
 pub use display::avatar::Avatar;
 pub use display::calendar::{Calendar, CalendarDate, CalendarMonth};
@@ -68,6 +73,7 @@ pub use lists::empty_state::EmptyState;
 pub use lists::list_item::ListItem;
 pub use lists::section_header::SectionHeader;
 pub use lists::tree_item::{Disclosure, TreeItem};
+pub use motion::{Motion, MotionExt, MotionPreference, Transition};
 pub use overlays::dialog::Dialog;
 pub use overlays::error_bubble::ErrorBubble;
 pub use overlays::menu::{Menu, MenuItem};

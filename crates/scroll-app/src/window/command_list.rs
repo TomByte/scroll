@@ -12,6 +12,8 @@ static ALL: LazyLock<Vec<&'static Command>> = LazyLock::new(|| {
         crate::editor::commands::COMMANDS,
         crate::database::commands::COMMANDS,
         crate::accounts::commands::COMMANDS,
+        crate::mcp::COMMANDS,
+        crate::settings::COMMANDS,
         super::commands::VIEW,
     ]
     .into_iter()

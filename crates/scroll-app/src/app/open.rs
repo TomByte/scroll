@@ -90,6 +90,9 @@ pub(super) fn open_workspace(index: usize, cx: &mut App) {
             if let Some(link) = entry.server.as_ref() {
                 accounts::apply_role(&link.server_url, cx);
             }
+            // Once the window listens, so a server that cannot start can say so there, and after
+            // the role (when already known), so a viewer's server never starts out offering edits.
+            crate::mcp::serve_current_workspace(cx);
             updating::close(cx);
         });
         if let Err(error) = opened {

@@ -4,6 +4,7 @@ use gpui::{
 };
 
 use crate::controls::text_input::TextInput;
+use crate::motion::{Motion, MotionExt};
 use crate::theme::Theme;
 
 /// Says why a value cannot be saved, in a small bubble just under the control holding it,
@@ -37,7 +38,8 @@ impl RenderOnce for ErrorBubble {
             .text_size(theme.text.small.size)
             .line_height(theme.text.small.line_height)
             .text_color(theme.colors.danger)
-            .child(self.message);
+            .child(self.message)
+            .motion("error-bubble", Motion::DropIn, window, cx);
         div()
             .absolute()
             .top_full()

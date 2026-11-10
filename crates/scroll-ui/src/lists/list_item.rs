@@ -7,6 +7,7 @@ use gpui::{
 use crate::display::icon::{Icon, IconName, IconSize};
 use crate::foundation::ellipsis::Ellipsis;
 use crate::foundation::focus::Clickable;
+use crate::motion::Transition;
 use crate::theme::Theme;
 use crate::{ClickHandler, MouseDownHandler};
 use gpui::{AnyView, AppContext, Context, Entity, Render};
@@ -151,15 +152,19 @@ impl RenderOnce for ListItem {
             colors.hover
         };
         let is_editing = self.editor.is_some();
-        let background = if self.is_selected || is_editing {
+        let id = self.id;
+        let selected_amount =
+            Transition::Select.fraction_on(id.clone(), self.is_selected, window, cx);
+        let background = if is_editing {
             Some(colors.selected)
+        } else if selected_amount > 0.0 {
+            Some(colors.selected.opacity(selected_amount))
         } else if self.is_highlighted {
             Some(colors.hover)
         } else {
             None
         };
 
-        let id = self.id;
         let group = SharedString::from(format!("list-item-{id}"));
         div()
             .id(id.clone())

@@ -327,3 +327,44 @@ fn deleting_a_page_on_a_local_only_workspace_removes_its_content_and_search_text
     assert!(store.search("Doomed", 5).unwrap().is_empty());
     assert!(store.search("0", 5).unwrap().is_empty());
 }
+
+#[test]
+fn refreshing_search_indexes_text_still_waiting_for_the_server() {
+    use crate::operation::{Operation, Record, Transaction};
+    use crate::position::Position;
+    use crate::record::Page;
+
+    let mut store = open_linked_in_memory();
+    let page = Page {
+        id: PageId::generate(),
+        parent: None,
+        title: "Garden".into(),
+        icon: None,
+        position: Position::between(None, None).unwrap(),
+        row_of: None,
+        is_archived: false,
+    };
+    let page_id = page.id;
+    store
+        .apply_local_transaction(&Transaction::new(vec![Operation::Create(Record::Page(
+            page,
+        ))]))
+        .unwrap();
+    let mut doc = PageDoc::new();
+    let block = doc
+        .insert_block(BlockPlacement::LastChildOf(None), BlockKind::Paragraph)
+        .unwrap();
+    doc.insert_text(block, 0, "tomatoes").unwrap();
+    store
+        .record_local_page_update(page_id, &doc.take_local_update().unwrap().unwrap())
+        .unwrap();
+    assert!(store.search("tomatoes", 5).unwrap().is_empty());
+
+    store.refresh_page_search(page_id).unwrap();
+
+    let hits = store.search("tomatoes", 5).unwrap();
+    assert_eq!(
+        hits.iter().map(|hit| hit.page_id).collect::<Vec<_>>(),
+        vec![page_id]
+    );
+}

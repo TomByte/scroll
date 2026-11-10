@@ -1,11 +1,12 @@
 use gpui::{
-    AnyView, AppContext, Context, DismissEvent, Entity, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, ManagedView, MouseButton, ParentElement, Render, Styled, Subscription, Window,
-    deferred, div,
+    AnyView, AppContext, Context, DismissEvent, ElementId, Entity, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, ManagedView, MouseButton, ParentElement, Render, Styled,
+    Subscription, Window, deferred, div,
 };
 
 use crate::foundation::actions::{Cancel, MODAL_CONTEXT};
 use crate::foundation::focus::contained_tab_navigation;
+use crate::motion::{Motion, MotionExt};
 use crate::theme::Theme;
 use gpui::{App, EventEmitter, prelude::FluentBuilder};
 
@@ -90,6 +91,7 @@ impl Render for ModalLayer {
             .items_center()
             .pt(theme.size.modal_top_offset)
             .bg(theme.colors.backdrop)
+            .motion("modal-backdrop", Motion::FadeIn, window, cx)
             .child(
                 contained_tab_navigation(div(), active.container.clone())
                     .key_context(MODAL_CONTEXT)
@@ -103,7 +105,14 @@ impl Render for ModalLayer {
                     .on_mouse_down_out(
                         cx.listener(|layer, _, window, cx| layer.dismiss(window, cx)),
                     )
-                    .child(active.view.clone()),
+                    .child(active.view.clone())
+                    // Keyed by the modal, so one replacing another rises in afresh.
+                    .motion(
+                        ElementId::View(active.view.entity_id()),
+                        Motion::RiseIn,
+                        window,
+                        cx,
+                    ),
             );
         div()
             .absolute()

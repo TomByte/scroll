@@ -5,6 +5,7 @@ use gpui::{
 
 use crate::display::icon::{Icon, IconName, IconSize};
 use crate::foundation::focus::Clickable;
+use crate::motion::{Transition, mix};
 use crate::theme::Theme;
 use gpui::AnyView;
 
@@ -58,16 +59,17 @@ impl RenderOnce for Checkbox {
         let theme = Theme::current(window, cx);
         let colors = &theme.colors;
         let group_name = SharedString::from(format!("checkbox-{}", self.id));
-        let (fill, border) = if self.is_checked {
-            (colors.accent, colors.accent)
-        } else {
-            (colors.control, colors.border_strong)
-        };
+        let checked_amount =
+            Transition::Toggle.fraction_on(self.id.clone(), self.is_checked, window, cx);
+        let fill = mix(colors.control, colors.accent, checked_amount);
+        let border = mix(colors.border_strong, colors.accent, checked_amount);
         let hover_fill = if self.is_checked {
             colors.accent_hover
         } else {
             colors.control_hover
         };
+        // The hover fill would hide the change of fill under the pointer that made it.
+        let is_settled = checked_amount == 0.0 || checked_amount == 1.0;
         let is_interactive = !self.is_disabled;
 
         let indicator = div()
@@ -80,7 +82,7 @@ impl RenderOnce for Checkbox {
             .border(theme.size.border_width)
             .border_color(border)
             .bg(fill)
-            .when(is_interactive, |indicator| {
+            .when(is_interactive && is_settled, |indicator| {
                 indicator.group_hover(group_name.clone(), |style| style.bg(hover_fill))
             })
             .when(self.is_checked, |indicator| {
