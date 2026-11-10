@@ -238,12 +238,12 @@ fn labelled_row(
         .into_any_element()
 }
 
-/// Every theme as a card showing its colours, since their names alone say little. "System" is
-/// drawn as the theme the system currently gives.
+/// Every theme as a row with a sample of its colours, since their names alone say little.
+/// "System" is drawn as the theme the system currently gives.
 fn theme_picker(theme: &Theme, window: &mut Window, cx: &mut App) -> AnyElement {
     let chosen = THEME.get(cx);
     let system_theme = ThemeId::system_default(window.appearance().into());
-    let mut cards = Vec::new();
+    let mut rows = Vec::new();
     for &option in ThemePreference::OPTIONS {
         let preview = match option {
             ThemePreference::System => ThemePreview::new(system_theme).label("System"),
@@ -254,14 +254,16 @@ fn theme_picker(theme: &Theme, window: &mut Window, cx: &mut App) -> AnyElement 
         } else {
             preview
         };
-        let card = div()
+        let row = div()
             .id(ElementId::Name(format!("theme-{}", option.id()).into()))
-            .rounded(theme.radius.lg)
+            .w_full()
+            .rounded(theme.radius.md)
             .child(preview);
-        cards.push(
-            Clickable::new(theme.radius.lg)
+        rows.push(
+            Clickable::new(theme.radius.md)
+                .hover(theme.colors.hover)
                 .on_click(move |_, _, cx| THEME.set(option, cx))
-                .apply(card, window, cx),
+                .apply(row, window, cx),
         );
     }
     div()
@@ -269,13 +271,7 @@ fn theme_picker(theme: &Theme, window: &mut Window, cx: &mut App) -> AnyElement 
         .flex_col()
         .gap(theme.spacing.md)
         .child(THEME.label)
-        .child(
-            div()
-                .flex()
-                .flex_wrap()
-                .gap(theme.spacing.lg)
-                .children(cards),
-        )
+        .child(div().flex().flex_col().gap(theme.spacing.xs).children(rows))
         .into_any_element()
 }
 

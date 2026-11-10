@@ -3,11 +3,13 @@ use gpui::{
     Window, div, prelude::FluentBuilder,
 };
 
+use crate::display::icon::{Icon, IconName, IconSize};
+use crate::foundation::ellipsis::Ellipsis;
 use crate::foundation::story::stateless_story;
 use crate::theme::{Theme, ThemeId, Themes};
 
-/// A theme's sample card and name, for a theme picker: its page colour with "Aa" in its text
-/// colour, and dots of its accent and code colours. Drawn in that theme whatever the window's.
+/// A theme as a row for a theme picker: a sample of its page and text colours, its name, and dots
+/// of its accent and code colours. The sample is drawn in that theme whatever the window's.
 #[derive(IntoElement)]
 pub struct ThemePreview {
     id: ThemeId,
@@ -30,7 +32,7 @@ impl ThemePreview {
         self
     }
 
-    /// The theme in use: its card is outlined in the accent.
+    /// The theme in use: its row is filled and ticked.
     pub fn selected(mut self) -> Self {
         self.is_selected = true;
         self
@@ -50,45 +52,53 @@ impl RenderOnce for ThemePreview {
             syntax.function,
         ]
         .map(|color| dot(color, &theme));
-        let card = div()
+        let sample = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
             .w(theme.size.theme_preview_width)
             .h(theme.size.theme_preview_height)
-            .p(theme.spacing.md)
-            .flex()
-            .flex_col()
-            .justify_between()
-            .rounded(theme.radius.lg)
+            .rounded(theme.radius.md)
             .border(theme.size.border_width)
             .border_color(theme.colors.border_strong)
-            .when(self.is_selected, |card| {
-                card.border(theme.size.focus_ring_width)
-                    .border_color(theme.colors.accent)
-            })
             .bg(colors.surface)
-            .child(
-                div()
-                    .text_color(colors.text)
-                    .text_size(theme.text.heading_3.size)
-                    .line_height(theme.text.heading_3.line_height)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Aa"),
-            )
-            .child(div().flex().gap(theme.spacing.xs).children(dots));
+            .text_color(colors.text)
+            .text_size(theme.text.small.size)
+            .font_weight(FontWeight::SEMIBOLD)
+            .child("Aa");
+        // Kept when not selected, as an empty space, so every row's dots line up.
+        let tick = div()
+            .flex()
+            .flex_none()
+            .justify_center()
+            .w(theme.size.icon_medium)
+            .when(self.is_selected, |tick| {
+                tick.child(
+                    Icon::new(IconName::Check)
+                        .size(IconSize::Small)
+                        .color(theme.colors.accent),
+                )
+            });
         div()
             .flex()
-            .flex_col()
-            .gap(theme.spacing.xs)
-            .child(card)
+            .items_center()
+            .gap(theme.spacing.md)
+            .w_full()
+            .px(theme.spacing.sm)
+            .py(theme.spacing.xs)
+            .rounded(theme.radius.md)
+            .when(self.is_selected, |row| row.bg(theme.colors.selected))
+            .child(sample)
+            .child(div().flex_1().min_w_0().ellipsis().child(self.label))
             .child(
                 div()
-                    .text_color(theme.colors.text_muted)
-                    .text_size(theme.text.small.size)
-                    .line_height(theme.text.small.line_height)
-                    .when(self.is_selected, |label| {
-                        label.text_color(theme.colors.text)
-                    })
-                    .child(self.label),
+                    .flex()
+                    .flex_none()
+                    .gap(theme.spacing.xs)
+                    .children(dots),
             )
+            .child(tick)
     }
 }
 
@@ -102,22 +112,19 @@ impl ThemePreview {
     }
 }
 
-/// Every theme, one row per family.
+/// Every theme, as a picker lists them, with the first selected.
 fn render_story(window: &mut Window, cx: &mut App) -> AnyElement {
     let theme = Theme::current(window, cx);
-    let families = ThemeId::ALL
-        .chunk_by(|a, b| a.family() == b.family())
-        .map(|family| {
-            div()
-                .flex()
-                .gap(theme.spacing.lg)
-                .children(family.iter().map(|&id| ThemePreview::new(id)))
-        });
+    let rows = ThemeId::ALL.iter().enumerate().map(|(index, &id)| {
+        let row = ThemePreview::new(id);
+        if index == 0 { row.selected() } else { row }
+    });
     div()
         .flex()
         .flex_col()
-        .gap(theme.spacing.lg)
-        .children(families)
+        .gap(theme.spacing.xs)
+        .w(theme.size.modal_width)
+        .children(rows)
         .into_any_element()
 }
 
