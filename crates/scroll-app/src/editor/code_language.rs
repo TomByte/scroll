@@ -243,6 +243,10 @@ impl PageEditor {
         cx: &mut Context<Self>,
     ) {
         let selection = self.selection;
+        if language == CodeLanguage::Mermaid {
+            // The code being written stays in view as it becomes a diagram's source.
+            self.diagram_being_edited = Some(block);
+        }
         self.apply_edit(cx, move |page| {
             page.set_block_language(block, language.id())?;
             Ok(selection)

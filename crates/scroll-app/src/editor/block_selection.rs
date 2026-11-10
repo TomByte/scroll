@@ -28,6 +28,7 @@ impl PageEditor {
             return;
         }
         let block = self.selection.block;
+        self.diagram_being_edited = None;
         self.block_selection = Some(BlockSelection {
             anchor: block,
             head: block,
@@ -44,6 +45,7 @@ impl PageEditor {
         cx: &mut Context<Self>,
     ) {
         let selection = Some(BlockSelection { anchor, head });
+        self.diagram_being_edited = None;
         if self.block_selection != selection {
             self.block_selection = selection;
             self.completion = None;

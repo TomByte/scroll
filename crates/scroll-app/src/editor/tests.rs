@@ -1031,7 +1031,7 @@ mod diagrams {
     }
 
     #[gpui::test]
-    fn arrowing_into_a_diagram_shows_its_source_from_the_nearest_end(cx: &mut TestAppContext) {
+    fn arrowing_into_a_diagram_selects_it_without_showing_its_source(cx: &mut TestAppContext) {
         let (editor, cx) = open_editor(&["above", ""], cx);
         let diagram = block(&editor, 1, cx);
         editor.update(cx, |editor, cx| {
@@ -1048,11 +1048,19 @@ mod diagrams {
         assert!(!is_editing(cx), "the caret left");
 
         cx.simulate_keystrokes("down");
+        assert!(!is_editing(cx), "only the Edit button shows the source");
         assert_eq!(
-            editor.read_with(cx, |editor, _| editor.selection()),
-            Selection::caret(diagram, 0)
+            editor.read_with(cx, |editor, _| editor.block_selection),
+            Some(crate::editor::BlockSelection {
+                anchor: diagram,
+                head: diagram,
+            }),
+            "the diagram is selected as a block"
         );
-        assert!(is_editing(cx), "the source shows again");
+
+        let edit = cx.debug_bounds("diagram-edit").expect("an Edit button");
+        cx.simulate_click(edit.center(), Modifiers::none());
+        assert!(is_editing(cx), "Edit shows the source");
     }
 
     #[gpui::test]

@@ -193,6 +193,9 @@ pub struct PageEditor {
     callout_picker_subscription: Option<Subscription>,
     code_highlights: syntax::CodeHighlights,
     diagrams: diagram_block::Diagrams,
+    /// The diagram whose source was asked for with its Edit button (or that was just made);
+    /// only that one shows its source.
+    diagram_being_edited: Option<BlockId>,
     drop_target: Option<drag_drop::DropTarget>,
     drag_motion: Option<drag_drop::DragMotion>,
     /// The caret moved since the pointer last did, so the drag handle shows on the caret's
@@ -262,6 +265,7 @@ impl PageEditor {
             callout_picker_subscription: None,
             code_highlights: syntax::CodeHighlights::default(),
             diagrams: diagram_block::Diagrams::default(),
+            diagram_being_edited: None,
             drop_target: None,
             drag_motion: None,
             is_handle_at_caret: false,

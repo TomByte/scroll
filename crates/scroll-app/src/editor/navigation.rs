@@ -39,7 +39,7 @@ struct VerticalTarget {
 impl PageEditor {
     fn set_selection(&mut self, selection: Selection, cx: &mut Context<Self>) {
         self.selection = selection;
-        self.block_selection = None;
+        self.block_selection = self.diagram_reached_without_editing(selection.block);
         self.pending_marks = None;
         self.close_completion_if_left();
         self.restart_caret_blink(cx);

@@ -22,7 +22,7 @@ use scroll_ui::{Button, ButtonSize, ButtonVariant, IconName, Theme, Transition};
 
 use super::code_language::{CodeLanguage, code_frame};
 use super::mermaid::{self, DiagramError, DiagramStyle, DrawnDiagram, EXAMPLE_DIAGRAM};
-use super::{PageEditor, Selection};
+use super::{BlockSelection, PageEditor, Selection};
 use crate::editor::document::{BlockId, BlockKind};
 
 /// The blocks at the top of a page that count as its first screen, whose diagrams (and code
@@ -178,10 +178,11 @@ impl PageEditor {
         self.kind_of(block) == BlockKind::Code && self.code_language(block) == CodeLanguage::Mermaid
     }
 
-    /// Whether the block's source shows: the page can be edited and the focused editor's
-    /// caret is in the block.
+    /// Whether the block's source shows: its Edit button asked for it, the page can be edited
+    /// and the focused editor's caret is still in the block.
     pub(super) fn is_editing_diagram(&self, block: BlockId, window: &Window) -> bool {
         !self.is_read_only()
+            && self.diagram_being_edited == Some(block)
             && self.selection.block == block
             && self.block_selection.is_none()
             && self.focus_handle.is_focused(window)
@@ -332,12 +333,30 @@ impl PageEditor {
             )
     }
 
+    /// The selection for a caret that lands in `block`: a diagram shows its source only by its
+    /// Edit button, so a caret arriving any other way (the arrows, say) selects the diagram as
+    /// a block instead, and a caret arriving anywhere else ends the editing of one.
+    pub(super) fn diagram_reached_without_editing(
+        &mut self,
+        block: BlockId,
+    ) -> Option<BlockSelection> {
+        if self.diagram_being_edited == Some(block) {
+            return None;
+        }
+        self.diagram_being_edited = None;
+        self.is_diagram(block).then_some(BlockSelection {
+            anchor: block,
+            head: block,
+        })
+    }
+
     /// Shows the diagram's source with the caret at its end.
     fn edit_diagram(&mut self, block: BlockId, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus_handle);
         if self.is_read_only() {
             return;
         }
+        self.diagram_being_edited = Some(block);
         let end = self.content(block).map_or(0, |content| content.text.len());
         self.move_caret(block, end, cx);
     }
@@ -351,6 +370,8 @@ impl PageEditor {
         cx: &mut Context<Self>,
     ) {
         self.completion = None;
+        // A diagram just made opens on its source, ready to be written.
+        self.diagram_being_edited = Some(block);
         self.apply_edit(cx, |page| {
             page.delete_text(block, markup.clone())?;
             page.set_kind(block, BlockKind::Code)?;

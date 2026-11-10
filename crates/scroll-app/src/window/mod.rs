@@ -93,6 +93,7 @@ impl AppWindow {
                 overlays.clone(),
                 cx,
             );
+            let sidebar = sidebar.with_tags_shown(workspace_settings.are_tags_shown);
             match sidebar_width {
                 Some(width) => sidebar.with_width(width),
                 None => sidebar,
@@ -178,6 +179,10 @@ impl AppWindow {
             SidebarEvent::ExpandedChanged => {
                 self.workspace_settings.expanded_pages =
                     self.sidebar.read(cx).expanded().iter().copied().collect();
+                self.save_workspace_settings(cx);
+            }
+            SidebarEvent::TagsShownChanged => {
+                self.workspace_settings.are_tags_shown = self.sidebar.read(cx).are_tags_shown();
                 self.save_workspace_settings(cx);
             }
             // Saved with the window frame when the app quits.

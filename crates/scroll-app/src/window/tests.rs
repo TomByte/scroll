@@ -484,8 +484,8 @@ mod page_switching {
 
     use super::open_app;
     use crate::editor::document::{BlockKind, PageDocument, Placement};
+    use crate::window::AppWindow;
     use crate::window::page_switch::PAGE_WAIT;
-    use crate::window::{AppWindow, PAGE_FADE_START};
     use crate::workspace::Workspace;
     use crate::workspace::storage;
 
@@ -631,7 +631,10 @@ mod page_switching {
         assert!(frames.len() >= 2, "frames were drawn: {frames:?}");
         for frame in &frames {
             assert!(frame.page.is_some() && !frame.is_loading, "{frame:?}");
-            assert!(frame.opacity >= PAGE_FADE_START, "{frame:?}");
+            assert!(
+                frame.opacity >= 0.5,
+                "at least half there from the start: {frame:?}"
+            );
         }
         let pages: Vec<PageId> = frames.iter().filter_map(|frame| frame.page).collect();
         assert!(pages.contains(&roadmap), "the new page was drawn");

@@ -39,6 +39,8 @@ use crate::workspace::{Workspace, WorkspaceEvent};
 pub enum SidebarEvent {
     OpenPage(PageId),
     ExpandedChanged,
+    /// The Tags section was opened or closed.
+    TagsShownChanged,
     /// Runs command `id` for a page (`None` is the open page), e.g. from the page menu.
     RunCommand(&'static str, Option<PageId>),
     /// The person finished dragging the sidebar to this width.
@@ -196,6 +198,16 @@ impl Sidebar {
 
     pub fn width(&self) -> Pixels {
         self.width
+    }
+
+    /// Starts with the Tags section as the person last left it.
+    pub fn with_tags_shown(mut self, are_tags_shown: bool) -> Self {
+        self.are_tags_shown = are_tags_shown;
+        self
+    }
+
+    pub fn are_tags_shown(&self) -> bool {
+        self.are_tags_shown
     }
 
     pub fn expanded(&self) -> &HashSet<PageId> {

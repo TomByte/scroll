@@ -1,5 +1,5 @@
-//! What this Mac remembers about one workspace: the page open last and the sidebar pages left
-//! expanded. Kept next to the workspace's file, as `<file>.settings.json`.
+//! What this Mac remembers about one workspace: the page open last, the sidebar pages left
+//! expanded and whether its Tags section is open. Kept next to the workspace's file, as `<file>.settings.json`.
 
 use std::path::{Path, PathBuf};
 
@@ -13,6 +13,8 @@ use crate::json_file;
 pub struct WorkspaceSettings {
     pub last_page: Option<PageId>,
     pub expanded_pages: Vec<PageId>,
+    /// Whether the sidebar's Tags section is open.
+    pub are_tags_shown: bool,
 }
 
 impl WorkspaceSettings {
@@ -54,6 +56,7 @@ mod tests {
         let settings = WorkspaceSettings {
             last_page: Some(PageId::generate()),
             expanded_pages: vec![PageId::generate()],
+            are_tags_shown: true,
         };
         settings.save(&workspace_file).unwrap();
         assert_eq!(WorkspaceSettings::load(&workspace_file), settings);

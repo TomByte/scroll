@@ -40,6 +40,7 @@ impl Sidebar {
             self.selected_tags.clear();
             self.tagged_pages.clear();
         }
+        cx.emit(SidebarEvent::TagsShownChanged);
         cx.notify();
     }
 
