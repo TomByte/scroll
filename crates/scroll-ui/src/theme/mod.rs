@@ -1,10 +1,13 @@
 //! Design tokens. Every colour, size and spacing value the kit draws with comes from here.
 //!
-//! Each window resolves its theme from its own appearance, so a window follows the system
-//! light/dark setting unless an appearance has been forced on it.
+//! Each window resolves its own theme: Scroll Light or Scroll Dark, following the system
+//! appearance, unless a named theme (`ThemeId`) has been forced on it.
 
 mod appearance;
+mod catalog;
+mod derivation;
 mod palettes;
+mod sources;
 mod swatches;
 mod tokens;
 
@@ -13,7 +16,10 @@ use std::sync::Arc;
 use gpui::{App, Window};
 
 pub(crate) use appearance::Themes;
-pub use appearance::{follow_system_appearance, follow_system_in_window, force_window_appearance};
+pub use appearance::{
+    follow_system_appearance, follow_system_in_window, force_window_appearance, force_window_theme,
+};
+pub use catalog::ThemeId;
 pub use swatches::SWATCH_COUNT;
 pub use tokens::{
     Appearance, Fonts, Radii, Scale, SemanticColors, Shadows, Sizes, Spacing, SyntaxColors,
@@ -37,7 +43,8 @@ pub struct Theme {
 }
 
 impl Theme {
-    /// The theme for `window`: its forced appearance if one was set, otherwise the system one.
+    /// The theme for `window`: the one forced on it if any, otherwise Scroll's own for the
+    /// system appearance.
     pub fn current(window: &Window, cx: &App) -> Arc<Theme> {
         cx.global::<Themes>().for_window(window)
     }

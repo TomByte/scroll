@@ -19,10 +19,8 @@ use gpui::{
 };
 use scroll_core::id::PageId;
 use scroll_settings::Settings;
-use scroll_ui::theme::{
-    follow_system_appearance, follow_system_in_window, force_window_appearance,
-};
-use scroll_ui::{Appearance, EmptyState, Theme};
+use scroll_ui::theme::{follow_system_appearance, follow_system_in_window, force_window_theme};
+use scroll_ui::{EmptyState, Theme};
 
 use crate::accounts::Accounts;
 use crate::commands::CommandUsage;
@@ -342,8 +340,7 @@ impl AppWindow {
     fn apply_theme(&self, window: &mut Window, cx: &mut Context<Self>) {
         match THEME.get(cx) {
             ThemePreference::System => follow_system_in_window(window, cx),
-            ThemePreference::Light => force_window_appearance(Appearance::Light, window, cx),
-            ThemePreference::Dark => force_window_appearance(Appearance::Dark, window, cx),
+            ThemePreference::Fixed(theme) => force_window_theme(theme, window, cx),
         }
     }
 

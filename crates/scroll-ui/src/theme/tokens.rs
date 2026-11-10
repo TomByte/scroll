@@ -155,6 +155,9 @@ pub struct Sizes {
     /// The narrowest a tab is while its name is being edited.
     pub tab_editor_min_width: Pixels,
     pub drag_preview_max_width: Pixels,
+    /// The sample card a theme picker shows for each theme.
+    pub theme_preview_width: Pixels,
+    pub theme_preview_height: Pixels,
     /// One emoji in the picker's grid, and one heading row.
     pub emoji_cell: Pixels,
     /// The picker's grid shows this much (eight rows of cells) before it scrolls.

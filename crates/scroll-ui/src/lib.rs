@@ -62,6 +62,7 @@ pub use display::pill_row::PillRow;
 pub use display::resize_handle::ResizeHandle;
 pub use display::scrollbar::{ScrollPosition, ScrollSource, Scrollbar};
 pub use display::tabs::Tabs;
+pub use display::theme_preview::ThemePreview;
 pub use display::titlebar_drag_area::TitlebarDragArea;
 pub use emoji::picker::{EmojiPicker, EmojiPickerEvent};
 pub use foundation::actions;
@@ -85,7 +86,7 @@ pub use overlays::toast::Toast;
 pub use overlays::toast_host::ToastHost;
 pub use overlays::tooltip::Tooltip;
 pub use text::TextSelection;
-pub use theme::{Appearance, TextSize, Theme};
+pub use theme::{Appearance, TextSize, Theme, ThemeId};
 
 use gpui::{App, ClickEvent, MouseDownEvent, Window};
 

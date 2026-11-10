@@ -3,15 +3,19 @@
 //! command list instead (`shortcuts`).
 
 use gpui::{
-    AnyElement, App, AppContext, Context, DismissEvent, Entity, EventEmitter, FocusHandle,
-    Focusable, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels, Render,
-    StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder, px,
+    AnyElement, App, AppContext, Context, DismissEvent, ElementId, Entity, EventEmitter,
+    FocusHandle, Focusable, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels,
+    Render, StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder,
+    px,
 };
-use scroll_settings::{AnySetting, Category, Control, Settings};
+use scroll_settings::{AnySetting, Category, Choice, Control, Settings};
 use scroll_ui::{
-    Button, ButtonSize, Divider, ListItem, Modal, ModalCloseButton, SegmentedControl, Switch, Theme,
+    Button, ButtonSize, Clickable, Divider, ListItem, Modal, ModalCloseButton, SegmentedControl,
+    Switch, Theme, ThemeId, ThemePreview,
 };
 use serde_json::Value;
+
+use crate::window::settings::{THEME, ThemePreference};
 
 use super::shortcuts::ShortcutList;
 use crate::commands::RunCommand;
@@ -109,13 +113,17 @@ impl Render for SettingsPage {
             .map(|(_, settings)| settings)
             .unwrap_or_default();
         let last = settings.len().saturating_sub(1);
-        let rows = settings
-            .into_iter()
-            .enumerate()
-            .flat_map(|(index, setting)| {
-                let divider = (index < last).then(|| Divider::horizontal().into_any_element());
-                std::iter::once(row(setting, &theme, cx)).chain(divider)
+        let mut rows = Vec::new();
+        for (index, setting) in settings.into_iter().enumerate() {
+            rows.push(if setting.key() == THEME.key {
+                theme_picker(&theme, window, cx)
+            } else {
+                row(setting, &theme, cx)
             });
+            if index < last {
+                rows.push(Divider::horizontal().into_any_element());
+            }
+        }
         let has_mcp_row = shown == Some(Category::Integrations) && mcp::SERVER_ENABLED.get(cx);
         let content = div()
             .id("settings")
@@ -227,6 +235,47 @@ fn labelled_row(
                 ),
         )
         .child(control)
+        .into_any_element()
+}
+
+/// Every theme as a card showing its colours, since their names alone say little. "System" is
+/// drawn as the theme the system currently gives.
+fn theme_picker(theme: &Theme, window: &mut Window, cx: &mut App) -> AnyElement {
+    let chosen = THEME.get(cx);
+    let system_theme = ThemeId::system_default(window.appearance().into());
+    let mut cards = Vec::new();
+    for &option in ThemePreference::OPTIONS {
+        let preview = match option {
+            ThemePreference::System => ThemePreview::new(system_theme).label("System"),
+            ThemePreference::Fixed(id) => ThemePreview::new(id),
+        };
+        let preview = if option == chosen {
+            preview.selected()
+        } else {
+            preview
+        };
+        let card = div()
+            .id(ElementId::Name(format!("theme-{}", option.id()).into()))
+            .rounded(theme.radius.lg)
+            .child(preview);
+        cards.push(
+            Clickable::new(theme.radius.lg)
+                .on_click(move |_, _, cx| THEME.set(option, cx))
+                .apply(card, window, cx),
+        );
+    }
+    div()
+        .flex()
+        .flex_col()
+        .gap(theme.spacing.md)
+        .child(THEME.label)
+        .child(
+            div()
+                .flex()
+                .flex_wrap()
+                .gap(theme.spacing.lg)
+                .children(cards),
+        )
         .into_any_element()
 }
 

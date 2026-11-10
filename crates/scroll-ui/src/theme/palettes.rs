@@ -1,4 +1,4 @@
-//! The light and dark values of every token.
+//! Scroll's own light and dark themes, and the tokens every theme shares.
 
 use gpui::{BoxShadow, Hsla, hsla, point, px};
 
@@ -213,7 +213,7 @@ impl Theme {
     }
 }
 
-fn spacing() -> Spacing {
+pub(super) fn spacing() -> Spacing {
     Spacing {
         xxs: px(2.0),
         xs: px(4.0),
@@ -226,7 +226,7 @@ fn spacing() -> Spacing {
     }
 }
 
-fn type_scale() -> TypeScale {
+pub(super) fn type_scale() -> TypeScale {
     TypeScale {
         caption: text_size(11.0, 14.0),
         small: text_size(12.0, 16.0),
@@ -240,7 +240,7 @@ fn type_scale() -> TypeScale {
     }
 }
 
-fn radii() -> Radii {
+pub(super) fn radii() -> Radii {
     Radii {
         sm: px(4.0),
         md: px(6.0),
@@ -249,7 +249,7 @@ fn radii() -> Radii {
     }
 }
 
-fn sizes() -> Sizes {
+pub(super) fn sizes() -> Sizes {
     Sizes {
         control_small: px(24.0),
         control_medium: px(28.0),
@@ -274,13 +274,15 @@ fn sizes() -> Sizes {
         option_list_max_height: px(240.0),
         tab_editor_min_width: px(150.0),
         drag_preview_max_width: px(300.0),
+        theme_preview_width: px(112.0),
+        theme_preview_height: px(64.0),
         emoji_cell: px(32.0),
         emoji_grid_height: px(256.0),
         avatar_ring_width: px(2.0),
     }
 }
 
-fn fonts() -> Fonts {
+pub(super) fn fonts() -> Fonts {
     Fonts {
         ui: ".SystemUIFont".into(),
         mono: "Menlo".into(),
@@ -305,7 +307,7 @@ fn text_size(size: f32, line_height: f32) -> TextSize {
 
 /// GPUI takes `blur` as the Gaussian's standard deviation, about half what CSS calls the blur
 /// radius, so the shadow fades out over roughly three times `blur`.
-fn shadow(color: Hsla, offset_y: f32, blur: f32, spread: f32) -> BoxShadow {
+pub(super) fn shadow(color: Hsla, offset_y: f32, blur: f32, spread: f32) -> BoxShadow {
     BoxShadow {
         color,
         offset: point(px(0.0), px(offset_y)),
@@ -317,12 +319,14 @@ fn shadow(color: Hsla, offset_y: f32, blur: f32, spread: f32) -> BoxShadow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::ThemeId;
 
     #[test]
     fn floating_panels_cast_one_soft_shadow_with_no_spread() {
-        for theme in [Theme::light(), Theme::dark()] {
+        for &id in ThemeId::ALL {
+            let theme = Theme::named(id);
             for shadows in [&theme.shadow.popover, &theme.shadow.modal] {
-                assert_eq!(shadows.len(), 1, "{:?}: one layer", theme.appearance);
+                assert_eq!(shadows.len(), 1, "{id:?}: one layer");
                 assert!(shadows[0].spread_radius >= px(0.0));
                 assert!(shadows[0].blur_radius <= px(16.0));
             }

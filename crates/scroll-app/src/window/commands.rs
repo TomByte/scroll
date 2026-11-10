@@ -1,7 +1,7 @@
 //! The window's own commands: going back and forward, the sidebar, the theme, the page width,
 //! closing and quitting.
 
-use scroll_ui::IconName;
+use scroll_ui::{IconName, ThemeId};
 
 use crate::commands::available::always;
 use crate::commands::{Category, Command, Effect, MenuName, Run, Shortcut, Surface};
@@ -128,7 +128,11 @@ pub static VIEW: &[Command] = &[
         is_available: always,
         run: Run::Dispatch {
             to: Surface::Window,
-            action: |_| Box::new(WindowCommand::Theme(ThemePreference::Light)),
+            action: |_| {
+                Box::new(WindowCommand::Theme(ThemePreference::Fixed(
+                    ThemeId::ScrollLight,
+                )))
+            },
         },
     },
     Command {
@@ -145,7 +149,11 @@ pub static VIEW: &[Command] = &[
         is_available: always,
         run: Run::Dispatch {
             to: Surface::Window,
-            action: |_| Box::new(WindowCommand::Theme(ThemePreference::Dark)),
+            action: |_| {
+                Box::new(WindowCommand::Theme(ThemePreference::Fixed(
+                    ThemeId::ScrollDark,
+                )))
+            },
         },
     },
     Command {

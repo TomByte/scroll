@@ -213,7 +213,10 @@ fn the_settings_page_opens_with_cmd_comma_and_the_window_follows_its_theme(
         keystroke: gpui::Keystroke::parse("space").unwrap(),
     });
     cx.run_until_parked();
-    assert_eq!(cx.update(|_, cx| THEME.get(cx)), ThemePreference::Light);
+    assert_eq!(
+        cx.update(|_, cx| THEME.get(cx)),
+        ThemePreference::Fixed(scroll_ui::ThemeId::ScrollLight)
+    );
     assert_eq!(appearance(cx), Appearance::Light);
 
     cx.simulate_keystrokes("escape");
@@ -222,7 +225,10 @@ fn the_settings_page_opens_with_cmd_comma_and_the_window_follows_its_theme(
         page: None,
     });
     cx.run_until_parked();
-    assert_eq!(cx.update(|_, cx| THEME.get(cx)), ThemePreference::Dark);
+    assert_eq!(
+        cx.update(|_, cx| THEME.get(cx)),
+        ThemePreference::Fixed(scroll_ui::ThemeId::ScrollDark)
+    );
     assert_eq!(appearance(cx), Appearance::Dark);
 }
 

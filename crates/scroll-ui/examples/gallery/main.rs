@@ -2,7 +2,8 @@
 //!
 //! `cargo run -p scroll-ui --example gallery`
 //! Pass `--keyboard-focus` to start with keyboard focus on the first control, to review focus
-//! rings, and `--from <Name>` to start the gallery at that component.
+//! rings, `--from <Name>` to start the gallery at that component, and `--theme <id>` (such as
+//! `catppuccin-mocha`) for one window in that theme instead.
 
 use gpui::{
     AnyView, App, AppContext, Application, Bounds, Context, FocusHandle, FontWeight,
@@ -10,7 +11,7 @@ use gpui::{
     Styled, Window, WindowBounds, WindowOptions, actions, div, point, px, size,
 };
 use scroll_ui::actions::FocusNext;
-use scroll_ui::theme::force_window_appearance;
+use scroll_ui::theme::force_window_theme;
 use scroll_ui::*;
 
 /// One line per component: its gallery heading and its story.
@@ -29,6 +30,7 @@ const STORIES: &[(&str, StoryBuilder)] = &[
     ("SectionHeader", SectionHeader::story),
     ("EmptyState", EmptyState::story),
     ("Tabs", Tabs::story),
+    ("ThemePreview", ThemePreview::story),
     ("Calendar", Calendar::story),
     ("Scrollbar", Scrollbar::story),
     ("Avatar", Avatar::story),
@@ -70,12 +72,22 @@ enum StartFocus {
 
 fn main() {
     let arguments: Vec<String> = std::env::args().collect();
-    let first_story = arguments
-        .iter()
-        .position(|argument| argument == "--from")
-        .and_then(|index| arguments.get(index + 1))
-        .and_then(|name| STORIES.iter().position(|(story, _)| story == name))
+    let first_story = argument_after("--from", &arguments)
+        .and_then(|name| STORIES.iter().position(|(story, _)| *story == name))
         .unwrap_or(0);
+    let themes: Vec<ThemeId> = match argument_after("--theme", &arguments) {
+        Some(id) => ThemeId::ALL
+            .iter()
+            .copied()
+            .filter(|theme| theme.id() == id)
+            .collect(),
+        None => vec![ThemeId::ScrollLight, ThemeId::ScrollDark],
+    };
+    if themes.is_empty() {
+        let ids: Vec<_> = ThemeId::ALL.iter().map(|theme| theme.id()).collect();
+        eprintln!("unknown theme; the themes are: {}", ids.join(", "));
+        return;
+    }
     let start_focus = if std::env::args().any(|argument| argument == "--keyboard-focus") {
         StartFocus::FirstControl
     } else {
@@ -87,18 +99,20 @@ fn main() {
             scroll_ui::init(cx);
             cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
             cx.on_action(|_: &Quit, cx| cx.quit());
-            for (index, appearance) in [Appearance::Light, Appearance::Dark]
-                .into_iter()
-                .enumerate()
-            {
+            for (index, &theme) in themes.iter().enumerate() {
                 let start = Start {
                     focus: start_focus,
                     first_story,
                 };
-                open_gallery_window(appearance, index, start, cx);
+                open_gallery_window(theme, index, start, cx);
             }
             cx.activate(true);
         });
+}
+
+fn argument_after<'a>(flag: &str, arguments: &'a [String]) -> Option<&'a str> {
+    let index = arguments.iter().position(|argument| argument == flag)?;
+    arguments.get(index + 1).map(String::as_str)
 }
 
 /// How each gallery window starts, from the command line.
@@ -108,7 +122,7 @@ struct Start {
     first_story: usize,
 }
 
-fn open_gallery_window(appearance: Appearance, index: usize, start: Start, cx: &mut App) {
+fn open_gallery_window(theme: ThemeId, index: usize, start: Start, cx: &mut App) {
     let (width, height) = WINDOW_SIZE;
     let origin = point(
         px(WINDOW_MARGIN + index as f32 * (width + WINDOW_GAP)),
@@ -122,8 +136,8 @@ fn open_gallery_window(appearance: Appearance, index: usize, start: Start, cx: &
         ..WindowOptions::default()
     };
     let opened = cx.open_window(options, |window, cx| {
-        force_window_appearance(appearance, window, cx);
-        let gallery = cx.new(|cx| Gallery::new(appearance, start.first_story, window, cx));
+        force_window_theme(theme, window, cx);
+        let gallery = cx.new(|cx| Gallery::new(theme, start.first_story, window, cx));
         if let StartFocus::FirstControl = start.focus {
             window.on_next_frame(|window, cx| window.dispatch_action(Box::new(FocusNext), cx));
         }
@@ -136,14 +150,14 @@ fn open_gallery_window(appearance: Appearance, index: usize, start: Start, cx: &
 }
 
 struct Gallery {
-    appearance: Appearance,
+    theme: ThemeId,
     stories: Vec<(&'static str, AnyView)>,
     focus_handle: FocusHandle,
 }
 
 impl Gallery {
     fn new(
-        appearance: Appearance,
+        theme: ThemeId,
         first_story: usize,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -155,7 +169,7 @@ impl Gallery {
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle);
         Gallery {
-            appearance,
+            theme,
             stories,
             focus_handle,
         }
@@ -165,10 +179,7 @@ impl Gallery {
 impl Render for Gallery {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::current(window, cx);
-        let title = match self.appearance {
-            Appearance::Light => "scroll-ui · light",
-            Appearance::Dark => "scroll-ui · dark",
-        };
+        let title = format!("scroll-ui · {}", self.theme.label());
         let stories = self.stories.iter().map(|(name, story)| {
             div()
                 .flex()

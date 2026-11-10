@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use gpui::App;
 use scroll_settings::{AnySetting, Category, Choice, Setting, Settings};
+use scroll_ui::ThemeId;
 use scroll_ui::motion::{self, MotionPreference};
 use serde::{Deserialize, Serialize};
 
@@ -33,31 +34,37 @@ pub static SETTINGS: &[&dyn AnySetting] = &[&THEME, &MOTION];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThemePreference {
+    /// Scroll's own light or dark theme, whichever the system is set to.
     System,
-    Light,
-    Dark,
+    Fixed(ThemeId),
 }
 
+const THEME_COUNT: usize = ThemeId::ALL.len();
+
+const THEME_OPTIONS: [ThemePreference; THEME_COUNT + 1] = {
+    let mut options = [ThemePreference::System; THEME_COUNT + 1];
+    let mut index = 0;
+    while index < THEME_COUNT {
+        options[index + 1] = ThemePreference::Fixed(ThemeId::ALL[index]);
+        index += 1;
+    }
+    options
+};
+
 impl Choice for ThemePreference {
-    const OPTIONS: &'static [Self] = &[
-        ThemePreference::System,
-        ThemePreference::Light,
-        ThemePreference::Dark,
-    ];
+    const OPTIONS: &'static [Self] = &THEME_OPTIONS;
 
     fn id(self) -> &'static str {
         match self {
             ThemePreference::System => "system",
-            ThemePreference::Light => "light",
-            ThemePreference::Dark => "dark",
+            ThemePreference::Fixed(theme) => theme.id(),
         }
     }
 
     fn label(self) -> &'static str {
         match self {
             ThemePreference::System => "System",
-            ThemePreference::Light => "Light",
-            ThemePreference::Dark => "Dark",
+            ThemePreference::Fixed(theme) => theme.label(),
         }
     }
 }

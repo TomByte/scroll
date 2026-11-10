@@ -9,4 +9,5 @@ pub mod pill_row;
 pub mod resize_handle;
 pub mod scrollbar;
 pub mod tabs;
+pub mod theme_preview;
 pub mod titlebar_drag_area;
