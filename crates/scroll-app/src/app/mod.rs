@@ -132,8 +132,7 @@ fn set_up_ui(cx: &mut App) {
     scroll_settings::register(mcp::SETTINGS, cx);
     settings::follow_motion(cx);
     mcp::init(cx);
-    commands::bind_keys(command_list::all(), cx);
-    menus::set_menus(cx);
+    commands::keep_keys_bound(command_list::all(), menus::set_menus, cx);
     log::debug!("timing: UI set up in {:?}", initialising.elapsed());
 }
 

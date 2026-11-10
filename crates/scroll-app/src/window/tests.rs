@@ -20,7 +20,7 @@ fn open_app(
     cx.update(|cx| {
         scroll_ui::init(cx);
         editor::init(cx);
-        commands::bind_keys(crate::window::command_list::all(), cx);
+        commands::keep_keys_bound(crate::window::command_list::all(), |_| {}, cx);
     });
     let directory: PathBuf =
         std::env::temp_dir().join(format!("scroll-shell-{}", PageId::generate().0));
@@ -205,9 +205,9 @@ fn the_settings_page_opens_with_cmd_comma_and_the_window_follows_its_theme(
 
     cx.simulate_keystrokes("cmd-,");
     cx.run_until_parked();
-    // Past the one category, the first control is the theme's first option, "System"; the next
-    // is "Light".
-    cx.simulate_keystrokes("tab tab tab");
+    // Past the two categories (Appearance and Shortcuts), the first control is the theme's first
+    // option, "System"; the next is "Light".
+    cx.simulate_keystrokes("tab tab tab tab");
     cx.simulate_keystrokes("space");
     cx.simulate_event(gpui::KeyUpEvent {
         keystroke: gpui::Keystroke::parse("space").unwrap(),
@@ -361,4 +361,109 @@ fn the_settings_shortcut_works_with_nothing_focused_and_closes_the_page_too(
     cx.simulate_keystrokes("cmd-,");
     cx.run_until_parked();
     assert!(page(cx).is_some(), "and once more opens it again");
+}
+
+/// Opens the settings page on its Shortcuts category and, with the keyboard alone, starts
+/// recording the first command listed ("New page").
+fn record_the_first_shortcut(cx: &mut VisualTestContext) {
+    let press = |key: &str, cx: &mut VisualTestContext| {
+        cx.simulate_keystrokes(key);
+        cx.simulate_event(gpui::KeyUpEvent {
+            keystroke: gpui::Keystroke::parse(key).unwrap(),
+        });
+        cx.run_until_parked();
+    };
+    cx.update(|_, cx| scroll_settings::register(crate::window::settings::SETTINGS, cx));
+    cx.simulate_keystrokes("cmd-,");
+    cx.run_until_parked();
+    // Appearance, then Shortcuts; then the first row's Change button.
+    cx.simulate_keystrokes("tab tab");
+    press("space", cx);
+    cx.simulate_keystrokes("tab");
+    press("space", cx);
+}
+
+#[gpui::test]
+fn a_shortcut_recorded_in_settings_runs_its_command_in_place_of_the_old_one(
+    cx: &mut TestAppContext,
+) {
+    use crate::settings::SettingsPage;
+
+    let (app, workspace, cx) = open_app(cx);
+    let preferences =
+        std::env::temp_dir().join(format!("scroll-keys-{}.json", PageId::generate().0));
+    cx.update(|_, cx| scroll_settings::init(preferences.clone(), cx));
+    let is_settings_open = |cx: &mut VisualTestContext| {
+        app.read_with(cx, |app, cx| {
+            app.overlays.showing::<SettingsPage>(cx).is_some()
+        })
+    };
+    let page_count = |cx: &mut VisualTestContext| {
+        workspace.read_with(cx, |workspace, _| workspace.tree().children(None).len())
+    };
+    let new_page_keys = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| crate::commands::hint(crate::window::command_list::all(), "page.new", cx))
+    };
+    let pages_before = page_count(cx);
+    record_the_first_shortcut(cx);
+
+    // Keys already in use are refused while recording, and do not run what they are bound to.
+    cx.simulate_keystrokes("cmd-,");
+    cx.run_until_parked();
+    assert!(is_settings_open(cx), "⌘, did not close the settings");
+    cx.simulate_keystrokes("cmd-shift-n");
+    cx.run_until_parked();
+    assert_eq!(page_count(cx), pages_before, "⇧⌘N did not make a sub-page");
+    assert_eq!(new_page_keys(cx), "⌘N");
+
+    cx.simulate_keystrokes("cmd-j");
+    cx.run_until_parked();
+    assert_eq!(new_page_keys(cx), "⌘J");
+    assert_eq!(page_count(cx), pages_before, "recording ⌘J did not run it");
+
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(
+        !is_settings_open(cx),
+        "with recording over, Escape closes the settings"
+    );
+    cx.simulate_keystrokes("cmd-n");
+    cx.run_until_parked();
+    assert_eq!(
+        page_count(cx),
+        pages_before,
+        "the old shortcut does nothing"
+    );
+    cx.simulate_keystrokes("cmd-j");
+    cx.run_until_parked();
+    assert_eq!(page_count(cx), pages_before + 1, "the new one makes a page");
+    assert_eq!(current_title(&app, &workspace, cx), "");
+
+    cx.update(|_, cx| scroll_settings::init(preferences.clone(), cx));
+    assert_eq!(new_page_keys(cx), "⌘J", "the change was saved");
+    std::fs::remove_file(preferences).ok();
+}
+
+#[gpui::test]
+fn escape_while_recording_gives_up_without_closing_the_settings(cx: &mut TestAppContext) {
+    use crate::settings::SettingsPage;
+
+    let (app, _workspace, cx) = open_app(cx);
+    let is_settings_open = |cx: &mut VisualTestContext| {
+        app.read_with(cx, |app, cx| {
+            app.overlays.showing::<SettingsPage>(cx).is_some()
+        })
+    };
+    record_the_first_shortcut(cx);
+
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(is_settings_open(cx));
+    let keys = cx
+        .update(|_, cx| crate::commands::hint(crate::window::command_list::all(), "page.new", cx));
+    assert_eq!(keys, "⌘N");
+
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert!(!is_settings_open(cx));
 }

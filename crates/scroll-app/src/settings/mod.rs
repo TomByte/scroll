@@ -1,8 +1,9 @@
-//! The settings page: every registered setting by category, opened with ⌘, from the app menu or
-//! the palette. Settings themselves are declared next to what they change (see
-//! `scroll_settings`); nothing here needs to know about them.
+//! The settings page: every registered setting by category, and every command's shortcut, opened
+//! with ⌘, from the app menu or the palette. Settings themselves are declared next to what they
+//! change (see `scroll_settings`); nothing here needs to know about them.
 
 mod page;
+mod shortcuts;
 
 use scroll_ui::IconName;
 

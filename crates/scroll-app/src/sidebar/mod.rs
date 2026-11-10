@@ -421,7 +421,7 @@ impl Render for Sidebar {
                     .child(
                         ListItem::new("search", "Search")
                             .icon(IconName::Search)
-                            .end_slot(hint(self.commands, OPEN_PALETTE))
+                            .end_slot(hint(self.commands, OPEN_PALETTE, cx))
                             .on_click(cx.listener(|_, _, _, cx| {
                                 cx.emit(SidebarEvent::RunCommand(OPEN_PALETTE, None))
                             })),
@@ -431,7 +431,7 @@ impl Render for Sidebar {
                             .child(
                                 ListItem::new("new-page", "New page")
                                     .icon(IconName::Plus)
-                                    .end_slot(hint(self.commands, NEW_PAGE))
+                                    .end_slot(hint(self.commands, NEW_PAGE, cx))
                                     .on_click(cx.listener(|_, _, _, cx| {
                                         cx.emit(SidebarEvent::RunCommand(NEW_PAGE, None))
                                     })),

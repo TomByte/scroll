@@ -118,9 +118,9 @@ mod tests {
                 "two commands are called {}",
                 command.id
             );
-            if let Some(shortcut) = command.shortcut {
+            if let Some(shortcut) = &command.shortcut {
                 assert!(
-                    keys.insert((shortcut.keys, shortcut.context)),
+                    keys.insert((shortcut.keys.clone(), shortcut.context)),
                     "{} reuses {}",
                     command.id,
                     shortcut.keys
@@ -153,9 +153,9 @@ mod tests {
         assert_eq!(Shortcut::global("cmd-[").unwrap().hint(), "⌘[");
     }
 
-    #[test]
-    fn every_shortcut_binds() {
-        if let Err(error) = crate::commands::key_bindings(all()) {
+    #[gpui::test]
+    fn every_shortcut_binds(cx: &mut gpui::TestAppContext) {
+        if let Err(error) = cx.update(|cx| crate::commands::key_bindings(all(), cx)) {
             panic!("{error}");
         }
     }

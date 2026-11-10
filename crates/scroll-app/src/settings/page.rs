@@ -1,10 +1,11 @@
 //! The settings page, drawn from the registry: the categories down the side, and a row per
-//! setting of the one picked, with the control its kind calls for.
+//! setting of the one picked, with the control its kind calls for. Shortcuts come from the
+//! command list instead (`shortcuts`).
 
 use gpui::{
-    AnyElement, App, Context, DismissEvent, EventEmitter, FocusHandle, Focusable, FontWeight,
-    InteractiveElement, IntoElement, ParentElement, Pixels, Render, StatefulInteractiveElement,
-    Styled, Subscription, Window, div, prelude::FluentBuilder, px,
+    AnyElement, App, AppContext, Context, DismissEvent, Entity, EventEmitter, FocusHandle,
+    Focusable, FontWeight, InteractiveElement, IntoElement, ParentElement, Pixels, Render,
+    StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder, px,
 };
 use scroll_settings::{AnySetting, Category, Control, Settings};
 use scroll_ui::{
@@ -12,6 +13,7 @@ use scroll_ui::{
 };
 use serde_json::Value;
 
+use super::shortcuts::ShortcutList;
 use crate::commands::RunCommand;
 use crate::mcp;
 
@@ -24,6 +26,7 @@ pub struct SettingsPage {
     focus_handle: FocusHandle,
     /// The category whose settings show; `None` until one is picked, which shows the first.
     category: Option<Category>,
+    shortcuts: Entity<ShortcutList>,
     _settings: Subscription,
 }
 
@@ -40,9 +43,17 @@ impl SettingsPage {
         SettingsPage {
             focus_handle: cx.focus_handle(),
             category: None,
+            shortcuts: cx.new(|_| ShortcutList::default()),
             // Shows changes made elsewhere too, such as a theme command run meanwhile.
             _settings: cx.observe_global::<Settings>(|_, cx| cx.notify()),
         }
+    }
+
+    fn show(&mut self, category: Category, cx: &mut Context<Self>) {
+        self.category = Some(category);
+        self.shortcuts
+            .update(cx, |shortcuts, cx| shortcuts.stop_recording(cx));
+        cx.notify();
     }
 
     fn render_categories(
@@ -55,10 +66,7 @@ impl SettingsPage {
         let rows = categories.iter().map(|&category| {
             ListItem::new(category.label(), category.label())
                 .when(shown == Some(category), ListItem::selected)
-                .on_click(cx.listener(move |page, _, _, cx| {
-                    page.category = Some(category);
-                    cx.notify();
-                }))
+                .on_click(cx.listener(move |page, _, _, cx| page.show(category, cx)))
         });
         div()
             .flex()
@@ -89,7 +97,11 @@ impl Render for SettingsPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::current(window, cx);
         let sections = Settings::sections(cx);
-        let categories: Vec<Category> = sections.iter().map(|(category, _)| *category).collect();
+        let mut categories: Vec<Category> =
+            sections.iter().map(|(category, _)| *category).collect();
+        categories.push(Category::Shortcuts);
+        categories.sort();
+        categories.dedup();
         let shown = self.category.or(categories.first().copied());
         let settings = sections
             .into_iter()
@@ -120,6 +132,9 @@ impl Render for SettingsPage {
                 content
                     .child(Divider::horizontal())
                     .child(mcp_connection_row(&theme))
+            })
+            .when(shown == Some(Category::Shortcuts), |content| {
+                content.child(self.shortcuts.clone())
             });
         let heading = div()
             .flex()

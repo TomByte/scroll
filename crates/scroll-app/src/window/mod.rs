@@ -406,7 +406,7 @@ impl Render for AppWindow {
             None => {
                 let no_pages = format!(
                     "No pages. Press {} to create one.",
-                    crate::commands::hint(command_list::all(), NEW_PAGE)
+                    crate::commands::hint(command_list::all(), NEW_PAGE, cx)
                 );
                 EmptyState::new(empty_text(&self.workspace.read(cx).sync_state(), &no_pages))
                     .into_any_element()

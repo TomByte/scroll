@@ -91,7 +91,7 @@ impl AppWindow {
             .child(
                 IconButton::new("back", IconName::ArrowLeft)
                     .size(ButtonSize::Small)
-                    .tooltip(format!("Back  {}", hint(command_list::all(), GO_BACK)))
+                    .tooltip(format!("Back  {}", hint(command_list::all(), GO_BACK, cx)))
                     .when(!self.history.can_go_back(), IconButton::disabled)
                     .on_click(cx.listener(|this, _, window, cx| this.go_back(window, cx))),
             )
@@ -100,7 +100,7 @@ impl AppWindow {
                     .size(ButtonSize::Small)
                     .tooltip(format!(
                         "Forward  {}",
-                        hint(command_list::all(), GO_FORWARD)
+                        hint(command_list::all(), GO_FORWARD, cx)
                     ))
                     .when(!self.history.can_go_forward(), IconButton::disabled)
                     .on_click(cx.listener(|this, _, window, cx| this.go_forward(window, cx))),

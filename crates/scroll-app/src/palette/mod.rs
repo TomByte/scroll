@@ -357,7 +357,7 @@ impl CommandPalette {
             }
             Item::Command(command) => {
                 let row = ListItem::new(id, command.title).icon(command.icon);
-                match command.shortcut {
+                match command.current_shortcut(cx) {
                     Some(shortcut) => row.end_slot(shortcut.hint()),
                     None => row.end_slot(command.category.label()),
                 }

@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use gpui::TestAppContext;
 
 use super::*;
-use crate::{Choice, ChoiceOption, Control, Setting};
+use crate::{Choice, ChoiceOption, Control, Setting, SettingMap};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Shade {
@@ -52,6 +52,8 @@ const IS_COMPACT: Setting<bool> = Setting {
     description: "Tighter rows.",
     default: true,
 };
+
+const KEYS: SettingMap = SettingMap { key: "test.keys" };
 
 /// A file of its own per test, removed when dropped.
 struct TemporaryFile(PathBuf);
@@ -202,4 +204,60 @@ fn observers_hear_about_every_change(cx: &mut TestAppContext) {
 #[should_panic(expected = "two settings are called test.shade")]
 fn registering_a_key_twice_is_a_mistake(cx: &mut TestAppContext) {
     cx.update(|cx| register(&[&SHADE, &SHADE], cx));
+}
+
+#[gpui::test]
+fn map_entries_survive_a_restart_and_are_removed_one_at_a_time(cx: &mut TestAppContext) {
+    let file = TemporaryFile::new();
+    cx.update(|cx| init(file.0.clone(), cx));
+    assert_eq!(
+        cx.update(|cx| KEYS.get("page.new", cx).map(str::to_owned)),
+        None
+    );
+
+    cx.update(|cx| {
+        KEYS.set("page.new", "cmd-j", cx);
+        KEYS.set("app.quit", "none", cx);
+        IS_SYNCED.set(true, cx);
+    });
+    cx.run_until_parked();
+    cx.update(|cx| init(file.0.clone(), cx));
+
+    let get =
+        |name: &str, cx: &mut TestAppContext| cx.update(|cx| KEYS.get(name, cx).map(str::to_owned));
+    assert_eq!(get("page.new", cx).as_deref(), Some("cmd-j"));
+    assert_eq!(get("app.quit", cx).as_deref(), Some("none"));
+
+    cx.update(|cx| KEYS.remove("page.new", cx));
+    cx.run_until_parked();
+    assert_eq!(get("page.new", cx), None);
+    assert_eq!(
+        file.read()["test.keys"],
+        serde_json::json!({"app.quit": "none"})
+    );
+    assert!(cx.update(|cx| IS_SYNCED.get(cx)));
+}
+
+#[gpui::test]
+fn map_entries_this_version_cannot_read_are_ignored_and_other_values_kept(cx: &mut TestAppContext) {
+    let file = TemporaryFile::new();
+    std::fs::write(
+        &file.0,
+        r#"{"test.keys": {"page.new": 7, "app.quit": "cmd-q"}, "test.synced": true}"#,
+    )
+    .unwrap();
+    cx.update(|cx| init(file.0.clone(), cx));
+    let get =
+        |name: &str, cx: &mut TestAppContext| cx.update(|cx| KEYS.get(name, cx).map(str::to_owned));
+    assert_eq!(get("page.new", cx), None);
+    assert_eq!(get("app.quit", cx).as_deref(), Some("cmd-q"));
+
+    std::fs::write(&file.0, r#"{"test.keys": "garbage", "test.synced": true}"#).unwrap();
+    cx.update(|cx| init(file.0.clone(), cx));
+    assert_eq!(get("app.quit", cx), None);
+    cx.update(|cx| KEYS.set("page.new", "cmd-j", cx));
+    cx.run_until_parked();
+    let saved = file.read();
+    assert_eq!(saved["test.keys"], serde_json::json!({"page.new": "cmd-j"}));
+    assert_eq!(saved["test.synced"], Value::Bool(true));
 }

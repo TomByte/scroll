@@ -9,11 +9,13 @@
 pub mod available;
 mod fuzzy;
 mod ranking;
+mod shortcuts;
 
 use std::rc::Rc;
 
 use gpui::{
-    Action, App, DummyKeyboardMapper, KeyBinding, KeyBindingContextPredicate, SharedString,
+    Action, App, DummyKeyboardMapper, KeyBinding, KeyBindingContextPredicate, KeyBindingMetaIndex,
+    Keystroke, NoAction, SharedString,
 };
 use scroll_core::id::PageId;
 use scroll_core::page_doc::BlockKind;
@@ -21,6 +23,7 @@ use scroll_ui::IconName;
 
 pub use fuzzy::fuzzy_score;
 pub use ranking::{CommandUsage, matching_commands};
+pub use shortcuts::ShortcutRefusal;
 
 /// Runs the command `id` from a key binding or a menu, for the page `page` (`None` means the
 /// open page).
@@ -138,41 +141,51 @@ pub enum Run {
 }
 
 /// The key that runs a command, in a key context (`None` is everywhere).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Shortcut {
-    pub keys: &'static str,
+    pub keys: SharedString,
     pub context: Option<&'static str>,
 }
 
 impl Shortcut {
     pub const fn global(keys: &'static str) -> Option<Shortcut> {
         Some(Shortcut {
-            keys,
+            keys: SharedString::new_static(keys),
             context: None,
         })
     }
 
     pub const fn in_context(keys: &'static str, context: &'static str) -> Option<Shortcut> {
         Some(Shortcut {
-            keys,
+            keys: SharedString::new_static(keys),
             context: Some(context),
         })
     }
 
     /// "⇧⌘N" for "cmd-shift-n": modifiers in the order macOS menus show them, then the key.
     pub fn hint(&self) -> String {
-        let parts: Vec<&str> = self.keys.split('-').collect();
-        let (modifiers, key) = parts.split_at(parts.len().saturating_sub(1));
-        let mut hint: String = [("ctrl", "⌃"), ("alt", "⌥"), ("shift", "⇧"), ("cmd", "⌘")]
-            .iter()
-            .filter(|(name, _)| modifiers.contains(name))
-            .map(|(_, symbol)| *symbol)
-            .collect();
-        hint.push_str(&match key.first().copied().unwrap_or_default() {
+        let Ok(keystroke) = Keystroke::parse(&self.keys) else {
+            return self.keys.to_string();
+        };
+        let modifiers = keystroke.modifiers;
+        let mut hint: String = [
+            (modifiers.control, "⌃"),
+            (modifiers.alt, "⌥"),
+            (modifiers.shift, "⇧"),
+            (modifiers.platform, "⌘"),
+        ]
+        .iter()
+        .filter(|(is_held, _)| *is_held)
+        .map(|(_, symbol)| *symbol)
+        .collect();
+        hint.push_str(&match keystroke.key.as_str() {
             "enter" => "↵".to_string(),
             "backspace" => "⌫".to_string(),
+            "delete" => "⌦".to_string(),
             "up" => "↑".to_string(),
             "down" => "↓".to_string(),
+            "left" => "←".to_string(),
+            "right" => "→".to_string(),
             "escape" => "esc".to_string(),
             "tab" => "⇥".to_string(),
             "space" => "Space".to_string(),
@@ -259,9 +272,9 @@ pub fn find(commands: &[&'static Command], id: &str) -> Option<&'static Command>
 }
 
 /// How command `id`'s shortcut is shown, e.g. "⌘N"; empty if it has none.
-pub fn hint(commands: &[&'static Command], id: &str) -> String {
+pub fn hint(commands: &[&'static Command], id: &str, cx: &App) -> String {
     find(commands, id)
-        .and_then(|command| command.shortcut)
+        .and_then(|command| command.current_shortcut(cx))
         .map(|shortcut| shortcut.hint())
         .unwrap_or_default()
 }
@@ -273,57 +286,120 @@ pub struct ShortcutError {
     reason: String,
 }
 
-/// Every command's key binding. Commands handled by whatever has focus bind their own action,
-/// so the component handling it works without the window around it (as in tests); the rest
-/// bind `RunCommand`.
-pub fn key_bindings(commands: &[&'static Command]) -> Result<Vec<KeyBinding>, ShortcutError> {
-    commands
-        .iter()
-        .filter_map(|command| Some((*command, command.shortcut?)))
-        .map(|(command, shortcut)| {
-            let error = |reason: String| ShortcutError {
-                command: command.id,
-                reason,
-            };
-            let action: Box<dyn Action> = match &command.run {
-                Run::Dispatch {
-                    to: Surface::Focused,
-                    action,
-                } => action(&Target::default()),
-                Run::Dispatch { .. } | Run::Choose { .. } => Box::new(RunCommand {
-                    id: command.id,
-                    page: None,
-                }),
-            };
-            let context = shortcut
-                .context
-                .map(|context| {
-                    KeyBindingContextPredicate::parse(context)
-                        .map(Rc::new)
-                        .map_err(|parse| error(parse.to_string()))
-                })
-                .transpose()?;
-            KeyBinding::load(
-                shortcut.keys,
-                action,
-                context,
-                false,
-                None,
-                &DummyKeyboardMapper,
-            )
-            .map_err(|load| error(load.to_string()))
-        })
+/// Marks the bindings made from commands, so a changed shortcut replaces just them and not the
+/// keys other parts of the app bind. Zero, because GPUI lets a `NoAction` binding switch off the
+/// bindings before it only when its mark is zero or absent.
+const FROM_COMMANDS: KeyBindingMetaIndex = KeyBindingMetaIndex(0);
+
+/// Every command's key binding, with the person's own shortcuts in place of the defaults.
+/// Commands handled by whatever has focus bind their own action, so the component handling it
+/// works without the window around it (as in tests); the rest bind `RunCommand`. A default the
+/// person replaced or removed is switched off first, as a component may bind it too (the
+/// table binds its own key for opening a row).
+pub fn key_bindings(
+    commands: &[&'static Command],
+    cx: &App,
+) -> Result<Vec<KeyBinding>, ShortcutError> {
+    let replaced_defaults = commands.iter().filter_map(|command| {
+        let default = command.shortcut.clone()?;
+        let is_replaced = command.current_shortcut(cx).as_ref() != Some(&default);
+        is_replaced.then(|| (*command, default, Box::new(NoAction) as Box<dyn Action>))
+    });
+    let current = commands.iter().filter_map(|command| {
+        let shortcut = command.current_shortcut(cx)?;
+        Some((*command, shortcut, bound_action(command)))
+    });
+    replaced_defaults
+        .chain(current)
+        .map(|(command, shortcut, action)| key_binding(command, &shortcut, action))
         .collect()
 }
 
-/// Binds every command's shortcut. A shortcut that cannot be bound is a mistake in the list:
-/// it stops a debug build, and a release build goes on without it.
-pub fn bind_keys(commands: &[&'static Command], cx: &mut App) {
-    match key_bindings(commands) {
-        Ok(bindings) => cx.bind_keys(bindings),
-        Err(error) if cfg!(debug_assertions) => panic!("{error}"),
-        Err(error) => log::error!("{error}"),
+fn bound_action(command: &Command) -> Box<dyn Action> {
+    match &command.run {
+        Run::Dispatch {
+            to: Surface::Focused,
+            action,
+        } => action(&Target::default()),
+        Run::Dispatch { .. } | Run::Choose { .. } => Box::new(RunCommand {
+            id: command.id,
+            page: None,
+        }),
     }
+}
+
+fn key_binding(
+    command: &Command,
+    shortcut: &Shortcut,
+    action: Box<dyn Action>,
+) -> Result<KeyBinding, ShortcutError> {
+    let error = |reason: String| ShortcutError {
+        command: command.id,
+        reason,
+    };
+    let context = shortcut
+        .context
+        .map(|context| {
+            KeyBindingContextPredicate::parse(context)
+                .map(Rc::new)
+                .map_err(|parse| error(parse.to_string()))
+        })
+        .transpose()?;
+    KeyBinding::load(
+        &shortcut.keys,
+        action,
+        context,
+        false,
+        None,
+        &DummyKeyboardMapper,
+    )
+    .map(|binding| binding.with_meta(FROM_COMMANDS))
+    .map_err(|load| error(load.to_string()))
+}
+
+/// Binds every command's shortcut, replacing the ones bound before. A shortcut that cannot be
+/// bound is a mistake in the list (the person's own are checked when read): it stops a debug
+/// build, and a release build keeps the keys it had.
+pub fn bind_keys(commands: &[&'static Command], cx: &mut App) {
+    let bindings = match key_bindings(commands, cx) {
+        Ok(bindings) => bindings,
+        Err(error) if cfg!(debug_assertions) => panic!("{error}"),
+        Err(error) => return log::error!("{error}"),
+    };
+    let others: Vec<KeyBinding> = cx
+        .key_bindings()
+        .borrow()
+        .bindings()
+        .filter(|binding| binding.meta() != Some(FROM_COMMANDS))
+        .cloned()
+        .collect();
+    cx.clear_key_bindings();
+    // After everything else, as at startup, so a command's key wins over a component's.
+    cx.bind_keys(others.into_iter().chain(bindings));
+}
+
+/// Binds every command's shortcut now, and again whenever the person changes one; `then` runs
+/// after each, for whatever else shows the keys (the menu bar).
+pub fn keep_keys_bound(commands: &'static [&'static Command], then: fn(&mut App), cx: &mut App) {
+    let mut bound = current_shortcuts(commands, cx);
+    bind_keys(commands, cx);
+    then(cx);
+    cx.observe_global::<scroll_settings::Settings>(move |cx| {
+        let current = current_shortcuts(commands, cx);
+        if current != bound {
+            bound = current;
+            bind_keys(commands, cx);
+            then(cx);
+        }
+    })
+    .detach();
+}
+
+fn current_shortcuts(commands: &[&'static Command], cx: &App) -> Vec<Option<Shortcut>> {
+    commands
+        .iter()
+        .map(|command| command.current_shortcut(cx))
+        .collect()
 }
 
 pub fn menu_items(commands: &[&'static Command], menu: MenuName) -> Vec<gpui::MenuItem> {

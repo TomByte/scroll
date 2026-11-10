@@ -19,11 +19,15 @@
 //!    Its row then appears on the settings page.
 //! 3. Read it with `LINE_NUMBERS.get(cx)`, change it with `LINE_NUMBERS.set(value, cx)`, and
 //!    follow changes with `cx.observe_global::<Settings>(…)`.
+//!
+//! A preference whose entries are not known in advance, such as a shortcut per command, is a
+//! `SettingMap` instead: a string per name, under one key, that the page does not list by
+//! itself.
 
 mod settings;
 
 use gpui::App;
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 pub use settings::{Settings, init, register};
 
@@ -32,6 +36,8 @@ pub use settings::{Settings, init, register};
 pub enum Category {
     Appearance,
     Integrations,
+    /// Drawn by the app from its commands rather than from registered settings.
+    Shortcuts,
 }
 
 impl Category {
@@ -39,6 +45,7 @@ impl Category {
         match self {
             Category::Appearance => "Appearance",
             Category::Integrations => "Integrations",
+            Category::Shortcuts => "Shortcuts",
         }
     }
 }
@@ -64,6 +71,48 @@ impl<T: SettingValue> Setting<T> {
     /// Takes effect at once (observers of `Settings` run) and is saved off the main thread.
     pub fn set(&self, value: T, cx: &mut App) {
         Settings::store(self.key, value.to_json(), cx);
+    }
+}
+
+/// A string per name, kept as one object under `key`; for preferences such as a shortcut per
+/// command, where a fixed list of `Setting`s does not fit.
+pub struct SettingMap {
+    /// What the file stores it under, so it must never change.
+    pub key: &'static str,
+}
+
+impl SettingMap {
+    /// The value stored for `name`; `None` if there is none, or if what the file holds is not a
+    /// string in an object (which this version cannot read, so it reads as nothing set).
+    pub fn get<'a>(&self, name: &str, cx: &'a App) -> Option<&'a str> {
+        cx.try_global::<Settings>()?
+            .stored(self.key)?
+            .as_object()?
+            .get(name)?
+            .as_str()
+    }
+
+    /// Takes effect at once and is saved off the main thread, as `Setting::set` does.
+    pub fn set(&self, name: &str, value: &str, cx: &mut App) {
+        let mut entries = self.entries(cx);
+        entries.insert(name.to_string(), Value::String(value.to_string()));
+        Settings::store(self.key, Value::Object(entries), cx);
+    }
+
+    pub fn remove(&self, name: &str, cx: &mut App) {
+        let mut entries = self.entries(cx);
+        if entries.remove(name).is_some() {
+            Settings::store(self.key, Value::Object(entries), cx);
+        }
+    }
+
+    /// Every stored entry; a value that is not an object is replaced by the next change.
+    fn entries(&self, cx: &App) -> Map<String, Value> {
+        cx.try_global::<Settings>()
+            .and_then(|settings| settings.stored(self.key))
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
