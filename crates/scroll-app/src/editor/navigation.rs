@@ -177,8 +177,15 @@ impl PageEditor {
         self.goal_x = Some(target.goal_x);
     }
 
-    /// Extends the selection up or down, stopping at the edges of the current block.
+    /// Extends the selection up or down within the current block. Once the head is at the
+    /// block's start (going up) or end (going down), the next step selects this block and its
+    /// neighbour as whole blocks, as in Notion.
     fn select_vertically(&mut self, direction: Direction, cx: &mut Context<Self>) {
+        if self.is_head_at_block_edge(direction) && self.has_adjacent_block(direction) {
+            let block = self.selection.block;
+            self.select_block_range(block, block, cx);
+            return self.step_block_selection(direction, SelectionStep::Extend, cx);
+        }
         let Some(target) = self.vertical_target(direction) else {
             return;
         };
@@ -198,6 +205,25 @@ impl PageEditor {
             cx,
         );
         self.goal_x = Some(target.goal_x);
+    }
+
+    fn is_head_at_block_edge(&self, direction: Direction) -> bool {
+        let head = self.selection.range.head;
+        match direction {
+            Direction::Backward => head == 0,
+            Direction::Forward => head == self.selected_text().len(),
+        }
+    }
+
+    /// Whether any block, a divider included, lies next to the selection's block.
+    fn has_adjacent_block(&self, direction: Direction) -> bool {
+        let Some(index) = self.block_index(self.selection.block) else {
+            return false;
+        };
+        match direction {
+            Direction::Backward => index > 0,
+            Direction::Forward => index + 1 < self.blocks.len(),
+        }
     }
 
     pub(super) fn move_left(&mut self, _: &MoveLeft, _: &mut Window, cx: &mut Context<Self>) {

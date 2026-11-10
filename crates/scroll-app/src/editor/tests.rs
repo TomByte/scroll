@@ -321,6 +321,119 @@ fn escape_selects_blocks_that_can_be_moved_and_deleted(cx: &mut TestAppContext) 
     assert!(editor.read_with(cx, |editor, _| editor.block_selection.is_none()));
 }
 
+fn selected_blocks(
+    editor: &Entity<PageEditor>,
+    cx: &mut VisualTestContext,
+) -> Option<std::ops::Range<usize>> {
+    editor.read_with(cx, |editor, _| editor.selected_block_range())
+}
+
+fn text_selection(
+    editor: &Entity<PageEditor>,
+    cx: &mut VisualTestContext,
+) -> std::ops::Range<usize> {
+    editor.read_with(cx, |editor, _| editor.selection().range.range())
+}
+
+#[gpui::test]
+fn shift_down_selects_text_to_the_block_end_then_whole_blocks(cx: &mut TestAppContext) {
+    let (editor, cx) = open_editor(&["ab", "cd", "ef", "gh"], cx);
+    cx.run_until_parked();
+    cx.simulate_keystrokes("right shift-down");
+    assert_eq!(
+        text_selection(&editor, cx),
+        1..2,
+        "first to the block's end"
+    );
+    assert_eq!(selected_blocks(&editor, cx), None);
+
+    cx.simulate_keystrokes("shift-down");
+    assert_eq!(
+        selected_blocks(&editor, cx),
+        Some(0..2),
+        "leaving the block selects it and the next"
+    );
+    cx.simulate_keystrokes("shift-down");
+    assert_eq!(selected_blocks(&editor, cx), Some(0..3));
+
+    cx.simulate_keystrokes("shift-up shift-up");
+    assert_eq!(selected_blocks(&editor, cx), Some(0..1), "shrinks back");
+    cx.simulate_keystrokes("shift-up");
+    assert_eq!(
+        selected_blocks(&editor, cx),
+        Some(0..1),
+        "the first block is the boundary"
+    );
+}
+
+#[gpui::test]
+fn shift_down_moves_by_line_while_the_block_has_lines_left(cx: &mut TestAppContext) {
+    let (editor, cx) = open_editor(&["x\ny", "z"], cx);
+    cx.run_until_parked();
+    cx.simulate_keystrokes("shift-down");
+    assert_eq!(text_selection(&editor, cx), 0..2, "onto the second line");
+    cx.simulate_keystrokes("shift-down");
+    assert_eq!(text_selection(&editor, cx), 0..3);
+    assert_eq!(selected_blocks(&editor, cx), None);
+    cx.simulate_keystrokes("shift-down");
+    assert_eq!(selected_blocks(&editor, cx), Some(0..2));
+}
+
+#[gpui::test]
+fn shift_up_selects_blocks_that_backspace_deletes_in_one_undo_step(cx: &mut TestAppContext) {
+    let (editor, cx) = open_editor(&["one", "two", "three"], cx);
+    cx.run_until_parked();
+    cx.simulate_keystrokes("cmd-down shift-down");
+    assert_eq!(
+        selected_blocks(&editor, cx),
+        None,
+        "the last block is the boundary"
+    );
+    assert_eq!(text_selection(&editor, cx), 5..5);
+
+    cx.simulate_keystrokes("shift-up");
+    assert_eq!(text_selection(&editor, cx), 0..5);
+    cx.simulate_keystrokes("shift-up shift-up shift-up");
+    assert_eq!(selected_blocks(&editor, cx), Some(0..3));
+    cx.simulate_keystrokes("shift-down");
+    assert_eq!(selected_blocks(&editor, cx), Some(1..3));
+
+    cx.simulate_keystrokes("backspace");
+    assert_eq!(texts(&editor, cx), ["one"]);
+    cx.simulate_keystrokes("cmd-z");
+    assert_eq!(texts(&editor, cx), ["one", "two", "three"]);
+}
+
+#[gpui::test]
+fn a_block_selection_extended_down_stays_in_view(cx: &mut TestAppContext) {
+    let paragraphs: Vec<String> = (0..300).map(|index| format!("Block {index}")).collect();
+    let paragraphs: Vec<&str> = paragraphs.iter().map(String::as_str).collect();
+    let (editor, cx) = open_editor(&paragraphs, cx);
+    cx.run_until_parked();
+    cx.simulate_keystrokes("escape");
+    for _ in 0..150 {
+        cx.simulate_keystrokes("shift-down");
+    }
+    cx.run_until_parked();
+    assert_eq!(selected_blocks(&editor, cx), Some(0..151));
+    let is_head_laid_out = editor.read_with(cx, |editor, _| {
+        editor.blocks[150].layout_frame == editor.frame
+    });
+    assert!(is_head_laid_out, "the head block is on screen");
+}
+
+#[gpui::test]
+fn up_and_down_move_a_block_selection_past_its_ends(cx: &mut TestAppContext) {
+    let (editor, cx) = open_editor(&["a", "b", "c", "d"], cx);
+    cx.run_until_parked();
+    cx.simulate_keystrokes("down down escape shift-up");
+    assert_eq!(selected_blocks(&editor, cx), Some(1..3));
+    cx.simulate_keystrokes("down");
+    assert_eq!(selected_blocks(&editor, cx), Some(3..4));
+    cx.simulate_keystrokes("shift-up up");
+    assert_eq!(selected_blocks(&editor, cx), Some(1..2));
+}
+
 #[gpui::test]
 fn ime_composition_is_not_written_until_committed(cx: &mut TestAppContext) {
     let (editor, cx) = open_editor(&["x"], cx);
@@ -555,6 +668,233 @@ fn the_page_width_setting_reaches_an_open_editor(cx: &mut TestAppContext) {
         editor.read_with(cx, |editor, _| editor.page_width),
         PageWidth::Full
     );
+}
+
+mod block_drag {
+    use std::time::Duration;
+
+    use gpui::{
+        Bounds, Modifiers, MouseButton, Pixels, Point, TestAppContext, VisualTestContext, point, px,
+    };
+    use scroll_ui::motion::{MotionPreference, set_preference};
+
+    use super::{block, open_editor, texts};
+    use crate::editor::document::BlockId;
+    use crate::editor::{BLOCK_MARKER_WIDTH, NEST_INDENT, PageEditor};
+
+    /// Longer than any transition in `scroll_ui::motion`.
+    const TRANSITION_DONE: Duration = Duration::from_millis(300);
+
+    fn open(cx: &mut TestAppContext) -> (gpui::Entity<PageEditor>, &mut VisualTestContext) {
+        let (editor, cx) = open_editor(&["one", "two", "three", "four"], cx);
+        cx.run_until_parked();
+        (editor, cx)
+    }
+
+    fn text_bounds(
+        editor: &gpui::Entity<PageEditor>,
+        index: usize,
+        cx: &mut VisualTestContext,
+    ) -> Bounds<Pixels> {
+        editor.read_with(cx, |editor, _| {
+            editor.blocks[index].layout.as_ref().unwrap().bounds()
+        })
+    }
+
+    fn upper_half(bounds: Bounds<Pixels>) -> Point<Pixels> {
+        point(bounds.left() + px(4.0), bounds.top() + px(1.0))
+    }
+
+    fn lower_half(bounds: Bounds<Pixels>) -> Point<Pixels> {
+        point(bounds.left() + px(4.0), bounds.bottom() - px(1.0))
+    }
+
+    /// Presses the handle of row `index` and drags it to `to`.
+    fn drag(
+        editor: &gpui::Entity<PageEditor>,
+        index: usize,
+        to: Point<Pixels>,
+        cx: &mut VisualTestContext,
+    ) {
+        let row = text_bounds(editor, index, cx);
+        let handle = point(row.left() - BLOCK_MARKER_WIDTH / 2.0, row.center().y);
+        cx.simulate_mouse_down(handle, MouseButton::Left, Modifiers::none());
+        move_pointer(handle + point(px(0.0), px(8.0)), cx);
+        move_pointer(to, cx);
+    }
+
+    fn move_pointer(to: Point<Pixels>, cx: &mut VisualTestContext) {
+        cx.simulate_mouse_move(to, Some(MouseButton::Left), Modifiers::none());
+    }
+
+    fn release(at: Point<Pixels>, cx: &mut VisualTestContext) {
+        cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+    }
+
+    fn redraw_later(editor: &gpui::Entity<PageEditor>, cx: &mut VisualTestContext) {
+        std::thread::sleep(TRANSITION_DONE);
+        editor.update(cx, |_, cx| cx.notify());
+        cx.run_until_parked();
+    }
+
+    /// The block whose row opens a gap above it, if the drag has a target.
+    fn gap_above(
+        editor: &gpui::Entity<PageEditor>,
+        cx: &mut VisualTestContext,
+    ) -> Option<Option<BlockId>> {
+        editor.read_with(cx, |editor, _| {
+            editor.drop_target.map(|target| target.gap_above)
+        })
+    }
+
+    /// How far each row's text sits below where it rests with no drag: the gaps above it.
+    fn row_shifts(
+        editor: &gpui::Entity<PageEditor>,
+        resting: &[Bounds<Pixels>],
+        cx: &mut VisualTestContext,
+    ) -> Vec<Pixels> {
+        (0..resting.len())
+            .map(|index| text_bounds(editor, index, cx).top() - resting[index].top())
+            .collect()
+    }
+
+    fn resting_rows(
+        editor: &gpui::Entity<PageEditor>,
+        cx: &mut VisualTestContext,
+    ) -> Vec<Bounds<Pixels>> {
+        (0..4).map(|index| text_bounds(editor, index, cx)).collect()
+    }
+
+    #[gpui::test]
+    fn the_gap_opens_above_the_row_the_drop_lands_before(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx);
+        let [two, three] = [block(&editor, 1, cx), block(&editor, 2, cx)];
+
+        drag(&editor, 0, upper_half(text_bounds(&editor, 2, cx)), cx);
+        assert_eq!(gap_above(&editor, cx), Some(Some(three)));
+        move_pointer(lower_half(text_bounds(&editor, 1, cx)), cx);
+        assert_eq!(
+            gap_above(&editor, cx),
+            Some(Some(three)),
+            "below a row is the same gap as above the next"
+        );
+        move_pointer(upper_half(text_bounds(&editor, 1, cx)), cx);
+        assert_eq!(gap_above(&editor, cx), Some(Some(two)));
+        move_pointer(lower_half(text_bounds(&editor, 3, cx)), cx);
+        assert_eq!(
+            gap_above(&editor, cx),
+            Some(None),
+            "below the last row the line shows without a gap"
+        );
+        let carried = text_bounds(&editor, 0, cx).center();
+        move_pointer(carried, cx);
+        assert_eq!(gap_above(&editor, cx), None, "not onto itself");
+
+        release(carried, cx);
+        assert_eq!(texts(&editor, cx), ["one", "two", "three", "four"]);
+    }
+
+    #[gpui::test]
+    fn a_dragged_block_lands_where_the_gap_opened_and_the_gap_goes_at_once(
+        cx: &mut TestAppContext,
+    ) {
+        let (editor, cx) = open(cx);
+        let resting = resting_rows(&editor, cx);
+        let target = lower_half(text_bounds(&editor, 2, cx));
+        drag(&editor, 0, target, cx);
+        assert_eq!(gap_above(&editor, cx), Some(Some(block(&editor, 3, cx))));
+
+        release(target, cx);
+        assert_eq!(texts(&editor, cx), ["two", "three", "one", "four"]);
+        assert_eq!(gap_above(&editor, cx), None);
+        assert_eq!(
+            row_shifts(&editor, &resting, cx),
+            [px(0.0); 4],
+            "the moved block fills the gap: every row is where it rests"
+        );
+
+        redraw_later(&editor, cx);
+        redraw_later(&editor, cx);
+        assert!(
+            editor.read_with(cx, |editor, _| editor.drag_motion.is_none()),
+            "rows stop paying for the drag once settled"
+        );
+    }
+
+    #[gpui::test]
+    fn dragging_right_of_a_row_drops_inside_it(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx);
+        let first = text_bounds(&editor, 0, cx);
+        let indented = point(first.left() + NEST_INDENT * 1.5, first.bottom() - px(1.0));
+        drag(&editor, 2, indented, cx);
+        assert_eq!(
+            gap_above(&editor, cx),
+            Some(Some(block(&editor, 1, cx))),
+            "the gap opens under the first row, as for any drop below it"
+        );
+        release(indented, cx);
+        assert_eq!(texts(&editor, cx), ["one", "three", "two", "four"]);
+        let depths: Vec<usize> = editor.read_with(cx, |editor, _| {
+            editor.blocks.iter().map(|block| block.info.depth).collect()
+        });
+        assert_eq!(depths, [0, 1, 0, 0]);
+    }
+
+    #[gpui::test]
+    fn the_gap_opens_and_closes_over_a_transition(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx);
+        let resting = resting_rows(&editor, cx);
+        let carried = resting[0].size.height;
+        drag(&editor, 0, upper_half(resting[2]), cx);
+        let opening = row_shifts(&editor, &resting, cx)[2];
+        assert!(opening < carried, "{opening:?} starts closed");
+
+        redraw_later(&editor, cx);
+        let shifts = row_shifts(&editor, &resting, cx);
+        let open = shifts[2];
+        assert!(open >= carried, "{open:?} fits the carried row");
+        assert_eq!(
+            shifts,
+            [px(0.0), px(0.0), open, open],
+            "rows part above the third"
+        );
+
+        release(point(px(-10.0), px(-10.0)), cx);
+        assert_eq!(texts(&editor, cx), ["one", "two", "three", "four"]);
+        let closing = row_shifts(&editor, &resting, cx)[2];
+        assert!(
+            closing > px(0.0),
+            "a cancelled drag closes the gap smoothly"
+        );
+        redraw_later(&editor, cx);
+        assert_eq!(row_shifts(&editor, &resting, cx), [px(0.0); 4]);
+    }
+
+    #[gpui::test]
+    fn reduced_motion_opens_and_closes_the_gap_at_once(cx: &mut TestAppContext) {
+        let (editor, cx) = open(cx);
+        cx.update(|_, cx| set_preference(MotionPreference::Reduced, cx));
+        let resting = resting_rows(&editor, cx);
+        let carried = resting[0].size.height;
+        let pointer = upper_half(resting[2]);
+        drag(&editor, 0, pointer, cx);
+        let gap = row_shifts(&editor, &resting, cx)[2];
+        assert!(gap >= carried, "{gap:?} is full at once");
+
+        move_pointer(pointer + point(px(1.0), px(0.0)), cx);
+        assert_eq!(
+            gap_above(&editor, cx),
+            Some(Some(block(&editor, 2, cx))),
+            "the gap that opened under the pointer keeps the target"
+        );
+
+        release(point(px(-10.0), px(-10.0)), cx);
+        assert_eq!(
+            row_shifts(&editor, &resting, cx),
+            [px(0.0); 4],
+            "and closes at once"
+        );
+    }
 }
 
 mod diagrams {

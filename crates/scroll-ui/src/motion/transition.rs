@@ -19,12 +19,15 @@ pub enum Transition {
     Page,
     /// The sidebar sliding open or closed.
     Sidebar,
+    /// Items parting to make room where a dragged item would land, and the dragged item being
+    /// picked up and set down. Fast and settling, as it follows the pointer.
+    Reorder,
 }
 
 impl Transition {
     fn timing(self) -> Timing {
         let (speed, easing) = match self {
-            Transition::Select => (Speed::Fast, Easing::Out),
+            Transition::Select | Transition::Reorder => (Speed::Fast, Easing::Out),
             Transition::Toggle => (Speed::Fast, Easing::InOut),
             Transition::Reveal | Transition::Page => (Speed::Normal, Easing::Out),
             Transition::Sidebar => (Speed::Slow, Easing::InOut),

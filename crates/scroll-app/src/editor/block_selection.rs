@@ -1,7 +1,7 @@
-//! Selecting whole blocks: Escape selects the current block, Shift+arrows extend, dragging
-//! across blocks or shift-clicking another block selects the range, and the selection can be
-//! deleted, copied, cut, indented or moved (with the keyboard or by a selected block's handle)
-//! as a unit.
+//! Selecting whole blocks: Escape selects the current block, Shift+Up/Down extend (from a text
+//! selection too, once it reaches its block's start or end), dragging across blocks or
+//! shift-clicking another block selects the range, and the selection can be deleted, copied,
+//! cut, indented or moved (with the keyboard or by a selected block's handle) as a unit.
 
 use std::ops::Range;
 
@@ -73,7 +73,9 @@ impl PageEditor {
         }
     }
 
-    /// Moves or extends the block selection one block up or down.
+    /// Extends the block selection one block up or down by moving its head (so it shrinks when
+    /// the head is heading back to the anchor), or moves it to the single block just past its
+    /// top or bottom. Steps are in document order whatever the blocks' nesting.
     pub(super) fn step_block_selection(
         &mut self,
         direction: Direction,
@@ -87,8 +89,10 @@ impl PageEditor {
         let Some(head) = self.block_index(selection.head) else {
             return;
         };
+        let last = self.blocks.len() - 1;
         let target = match (direction, step) {
-            (Direction::Forward, _) => (head + 1).min(self.blocks.len() - 1),
+            (Direction::Forward, SelectionStep::Extend) => (head + 1).min(last),
+            (Direction::Forward, SelectionStep::Move) => range.end.min(last),
             (Direction::Backward, SelectionStep::Extend) => head.saturating_sub(1),
             (Direction::Backward, SelectionStep::Move) => range.start.saturating_sub(1),
         };

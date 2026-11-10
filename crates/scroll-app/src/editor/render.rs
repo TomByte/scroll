@@ -24,6 +24,7 @@ impl Render for PageEditor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::current(window, cx);
         self.frame += 1;
+        self.begin_drag_motion_frame(cx);
         self.reveal_caret_if_needed(window);
         let editor = cx.entity().downgrade();
         let blocks = list(
@@ -141,6 +142,7 @@ impl PageEditor {
     ) -> AnyElement {
         let theme = Theme::current(window, cx);
         let header_rows = self.header_rows();
+        let mut gap = None;
         let row = if index < header_rows {
             // A press in the header is the header's own (the title takes focus from it): it must not
             // reach the editor, which would take focus back and put the caret in the last block.
@@ -151,7 +153,17 @@ impl PageEditor {
                     .into_any_element()
             })
         } else {
-            Some(self.render_block(index - header_rows, &theme, window, cx))
+            let block = self.render_block(index - header_rows, &theme, window, cx);
+            Some(match self.row_motion(index - header_rows, window, cx) {
+                Some(motion) => {
+                    gap = motion.gap;
+                    div()
+                        .opacity(motion.opacity)
+                        .child(block)
+                        .into_any_element()
+                }
+                None => block,
+            })
         };
         div()
             .w_full()
@@ -167,6 +179,7 @@ impl PageEditor {
                         column.max_w(width)
                     })
                     .px(PAGE_MARGIN)
+                    .children(gap)
                     .children(row),
             )
             .into_any_element()
@@ -184,7 +197,7 @@ impl PageEditor {
         let indent = NEST_INDENT * block.info.depth as f32;
         let is_block_selected = self.is_block_selected(index);
         let drop_line = self.drop_indicator_for(id);
-        let group = SharedString::from(format!("block-{index}"));
+        let group = row_group(index);
 
         let body = if block.info.kind == BlockKind::Divider {
             div()
@@ -243,7 +256,7 @@ impl PageEditor {
             )
             // A viewer cannot move blocks, so there is nothing to grab.
             .when(!self.is_read_only(), |row| {
-                row.child(self.render_drag_handle(index, group, theme))
+                row.child(self.render_drag_handle(index, theme, cx))
             })
             .children(drop_line)
             .into_any_element()
@@ -333,10 +346,12 @@ impl PageEditor {
     fn render_drag_handle(
         &self,
         index: usize,
-        group: SharedString,
         theme: &Theme,
+        cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let block = &self.blocks[index];
+        let group = row_group(index);
+        let editor = cx.entity();
         let dragged = self.blocks_to_drag(index);
         let indent = NEST_INDENT * block.info.depth as f32;
         let line_height = text_size(block.info.kind, theme).line_height;
@@ -369,7 +384,9 @@ impl PageEditor {
                     .color(theme.colors.text_placeholder),
             )
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_drag(dragged, |dragged, _, _, cx| {
+            .on_drag(dragged, move |dragged, _, window, cx| {
+                let theme = Theme::current(window, cx);
+                editor.update(cx, |editor, _| editor.start_drag_motion(dragged, &theme));
                 cx.new(|_| DragPreview::new(dragged.label.clone()).icon(IconName::Grip))
             })
     }
@@ -454,7 +471,7 @@ pub(super) fn text_size(kind: BlockKind, theme: &Theme) -> TextSize {
     }
 }
 
-fn top_spacing(kind: BlockKind, theme: &Theme) -> gpui::Pixels {
+pub(super) fn top_spacing(kind: BlockKind, theme: &Theme) -> gpui::Pixels {
     match kind {
         BlockKind::Heading1 => theme.spacing.xxl,
         BlockKind::Heading2 => theme.spacing.xl,
@@ -473,6 +490,11 @@ pub(super) fn is_heading(kind: BlockKind) -> bool {
 
 fn bullet_for_depth(depth: usize) -> &'static str {
     ["•", "◦", "▪"][depth % 3]
+}
+
+/// The hover group of row `index`, which shows its drag handle.
+fn row_group(index: usize) -> SharedString {
+    SharedString::from(format!("block-{index}"))
 }
 
 /// The handle fills the marker column, less a gap before the text.

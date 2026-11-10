@@ -194,6 +194,7 @@ pub struct PageEditor {
     code_highlights: syntax::CodeHighlights,
     diagrams: diagram_block::Diagrams,
     drop_target: Option<drag_drop::DropTarget>,
+    drag_motion: Option<drag_drop::DragMotion>,
     /// The caret moved since the pointer last did, so the drag handle shows on the caret's
     /// block rather than under a pointer that has not moved.
     is_handle_at_caret: bool,
@@ -262,6 +263,7 @@ impl PageEditor {
             code_highlights: syntax::CodeHighlights::default(),
             diagrams: diagram_block::Diagrams::default(),
             drop_target: None,
+            drag_motion: None,
             is_handle_at_caret: false,
             page_width: PAGE_WIDTH.get(cx),
             focus_handle: cx.focus_handle(),
