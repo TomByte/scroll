@@ -12,11 +12,10 @@ use scroll_ui::{
 
 use super::block_element::BlockElement;
 use super::{
-    BLOCK_MARKER_WIDTH, BlockState, CONTENT_MAX_WIDTH, KEY_CONTEXT, NEST_INDENT, PageEditor,
-    QUOTE_BAR_WIDTH,
+    BLOCK_MARKER_WIDTH, BlockState, KEY_CONTEXT, NEST_INDENT, PageEditor, QUOTE_BAR_WIDTH,
 };
-use crate::editor::document::BlockKind;
-use crate::page_layout::PAGE_MARGIN;
+use crate::editor::document::{BlockId, BlockKind};
+use crate::page_layout::{PAGE_MARGIN, PAGE_WIDTH};
 
 /// Room to scroll the last block up from the window's bottom edge.
 const END_OF_PAGE_SPACE: gpui::Pixels = gpui::px(160.0);
@@ -157,7 +156,9 @@ impl PageEditor {
             .child(
                 div()
                     .w_full()
-                    .max_w(CONTENT_MAX_WIDTH + PAGE_MARGIN * 2.0)
+                    .when_some(self.page_width.document_max_width(), |column, width| {
+                        column.max_w(width)
+                    })
                     .px(PAGE_MARGIN)
                     .children(row),
             )
@@ -193,7 +194,12 @@ impl PageEditor {
             let is_focused = self.focus_handle.is_focused(window);
             let element =
                 BlockElement::new(cx.entity(), id, self.block_paint(index, theme, is_focused));
-            decorate_text(block, theme, div().flex_1().min_w_0().child(element))
+            let text = div().flex_1().min_w_0().child(element);
+            if block.info.kind == BlockKind::Code {
+                self.render_code_block(id, text, window, cx)
+            } else {
+                decorate_text(block, theme, text)
+            }
         };
 
         div()
@@ -291,8 +297,30 @@ impl PageEditor {
         Some(marker)
     }
 
-    /// The handle shown left of a block on hover; dragging it moves the block (or the
-    /// selected blocks, if it is one of them).
+    /// The page width setting changed: rows the list measured at the old width are measured
+    /// again, keeping the scroll position.
+    pub(super) fn follow_page_width(&mut self, cx: &mut Context<Self>) {
+        let width = PAGE_WIDTH.get(cx);
+        if width == self.page_width {
+            return;
+        }
+        self.page_width = width;
+        let top = self.list_state.logical_scroll_top();
+        let rows = self.list_state.item_count();
+        self.list_state.splice(0..rows, rows);
+        self.list_state.scroll_to(top);
+        cx.notify();
+    }
+
+    /// The block whose drag handle shows wherever the pointer is: the caret's, while the caret
+    /// has moved since the pointer last did (after Enter, say, the pointer still rests on the
+    /// block above). `None` leaves the handle to pointer hover.
+    pub(super) fn block_with_handle_at_caret(&self) -> Option<BlockId> {
+        self.is_handle_at_caret.then_some(self.selection.block)
+    }
+
+    /// The handle shown left of a block on hover, or on the caret's block while typing;
+    /// dragging it moves the block (or the selected blocks, if it is one of them).
     fn render_drag_handle(
         &self,
         index: usize,
@@ -315,8 +343,13 @@ impl PageEditor {
             .justify_center()
             .rounded(theme.radius.sm)
             .cursor_grab()
-            .invisible()
-            .group_hover(group, |handle| handle.visible())
+            .map(|handle| match self.block_with_handle_at_caret() {
+                Some(caret_block) if caret_block == block.info.id => handle,
+                Some(_) => handle.invisible(),
+                None => handle
+                    .invisible()
+                    .group_hover(group, |handle| handle.visible()),
+            })
             .hover(|handle| handle.bg(theme.colors.hover))
             .child(
                 Icon::new(IconName::Grip)
@@ -382,7 +415,8 @@ fn when_focused<A: gpui::Action>(
     })
 }
 
-/// Kind-specific framing around a block's text: quote bar, callout and code backgrounds.
+/// Kind-specific framing around a block's text: quote bar and callout background. Code
+/// blocks have their own, with a language label (`render_code_block`).
 fn decorate_text(block: &BlockState, theme: &Theme, text: gpui::Div) -> AnyElement {
     match block.info.kind {
         BlockKind::Quote => div()
@@ -391,14 +425,6 @@ fn decorate_text(block: &BlockState, theme: &Theme, text: gpui::Div) -> AnyEleme
             .border_l(QUOTE_BAR_WIDTH)
             .border_color(theme.colors.text)
             .pl(theme.spacing.lg)
-            .child(text)
-            .into_any_element(),
-        BlockKind::Code => div()
-            .flex_1()
-            .min_w_0()
-            .p(theme.spacing.lg)
-            .rounded(theme.radius.md)
-            .bg(theme.colors.code_background)
             .child(text)
             .into_any_element(),
         BlockKind::Callout => div().flex_1().min_w_0().child(text).into_any_element(),

@@ -278,3 +278,21 @@ fn what_an_ai_tool_writes_shows_in_the_window(cx: &mut TestAppContext) {
     assert_eq!(current_title(&app, &workspace, cx), "Renamed by an AI");
     assert_eq!(*delivered.borrow(), vec![(page, 1)]);
 }
+
+#[gpui::test]
+fn the_full_width_command_flips_the_page_width_setting(cx: &mut TestAppContext) {
+    use crate::page_layout::{PAGE_WIDTH, PageWidth};
+    use crate::window::commands::TOGGLE_PAGE_WIDTH;
+
+    let (_app, _workspace, cx) = open_app(cx);
+    let run = |cx: &mut VisualTestContext| {
+        cx.dispatch_action(commands::RunCommand {
+            id: TOGGLE_PAGE_WIDTH,
+            page: None,
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| PAGE_WIDTH.get(cx))
+    };
+    assert_eq!(run(cx), PageWidth::Full);
+    assert_eq!(run(cx), PageWidth::Constrained);
+}

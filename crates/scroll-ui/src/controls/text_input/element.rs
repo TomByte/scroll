@@ -1,8 +1,8 @@
 use std::ops::Range;
 
 use gpui::{
-    App, AvailableSpace, Bounds, ContentMask, Element, ElementId, ElementInputHandler, Entity,
-    Font, GlobalElementId, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels,
+    App, AvailableSpace, Bounds, ContentMask, Edges, Element, ElementId, ElementInputHandler,
+    Entity, Font, GlobalElementId, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels,
     SharedString, Style, TextAlign, TextRun, UnderlineStyle, Window, WrappedLine, fill, font,
     point, px, relative, size,
 };
@@ -23,8 +23,15 @@ impl TextInputElement {
     }
 }
 
+/// How far, as a fraction of the font size, the text may be painted past the field's left and
+/// right edges. Some glyphs' ink starts left of the pen position (a bold "W" or "T" at the
+/// start of a title), and a mask at the exact edge shaves it off.
+const GLYPH_OVERHANG: f32 = 0.125;
+
 pub(super) struct PrepaintState {
     text: ShapedText,
+    /// Where the text may paint: the field, widened by the glyph overhang.
+    text_mask: Bounds<Pixels>,
     scroll_offset: Pixels,
     selection: Vec<PaintQuad>,
     caret: Option<PaintQuad>,
@@ -93,7 +100,9 @@ impl Element for TextInputElement {
     ) -> Self::PrepaintState {
         let theme = Theme::current(window, cx);
         let input = self.input.read(cx);
-        let line_height = input.text_size.unwrap_or(theme.text.ui).line_height;
+        let text_size = input.text_size.unwrap_or(theme.text.ui);
+        let line_height = text_size.line_height;
+        let text_mask = text_mask(bounds, text_size.size);
         let wrap_width = input.is_wrapping.then_some(bounds.size.width);
         let text = ShapedText::new(
             DisplayText::new(input, &theme).shape(wrap_width, window),
@@ -140,6 +149,7 @@ impl Element for TextInputElement {
 
         PrepaintState {
             text,
+            text_mask,
             scroll_offset,
             selection,
             caret,
@@ -164,7 +174,10 @@ impl Element for TextInputElement {
         );
 
         let origin = point(bounds.left() - prepaint.scroll_offset, bounds.top());
-        window.with_content_mask(Some(ContentMask { bounds }), |window| {
+        let mask = ContentMask {
+            bounds: prepaint.text_mask,
+        };
+        window.with_content_mask(Some(mask), |window| {
             for selection in prepaint.selection.drain(..) {
                 window.paint_quad(selection);
             }
@@ -197,6 +210,16 @@ impl Element for TextInputElement {
             });
         });
     }
+}
+
+/// Where a field's text may paint: its bounds, widened left and right by the glyph overhang.
+fn text_mask(bounds: Bounds<Pixels>, font_size: Pixels) -> Bounds<Pixels> {
+    let overhang = font_size * GLYPH_OVERHANG;
+    bounds.extend(Edges {
+        left: overhang,
+        right: overhang,
+        ..Edges::default()
+    })
 }
 
 /// The text a field draws, styled and ready to shape at any width.
@@ -315,5 +338,14 @@ mod tests {
         assert_eq!(scroll_to_reveal(px(0.0), px(50.0), width, caret), px(0.0));
         assert_eq!(scroll_to_reveal(px(0.0), px(150.0), width, caret), px(52.0));
         assert_eq!(scroll_to_reveal(px(60.0), px(10.0), width, caret), px(10.0));
+    }
+
+    #[test]
+    fn text_may_paint_a_little_past_the_left_and_right_edges_only() {
+        let field = Bounds::new(point(px(40.0), px(10.0)), size(px(200.0), px(40.0)));
+        let mask = text_mask(field, px(32.0));
+        assert_eq!(mask.left(), px(36.0), "room for a bold first letter's ink");
+        assert_eq!(mask.right(), px(244.0));
+        assert_eq!((mask.top(), mask.bottom()), (field.top(), field.bottom()));
     }
 }

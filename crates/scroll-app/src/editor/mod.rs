@@ -12,6 +12,7 @@ mod block_paint;
 mod block_selection;
 mod callout_icon;
 mod clipboard;
+mod code_language;
 pub mod commands;
 pub mod document;
 mod drag_drop;
@@ -28,6 +29,7 @@ mod replica_tests;
 pub mod rich_text;
 pub mod slash_commands;
 pub mod structure;
+mod syntax;
 #[cfg(test)]
 mod tests;
 mod visual_lines;
@@ -40,17 +42,17 @@ use gpui::{
     AnyView, App, AppContext, Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable,
     ListAlignment, ListState, Pixels, Point, SharedString, Subscription, Task, Window, actions,
 };
+use scroll_settings::Settings;
 use scroll_ui::{PopupHost, TextSelection};
 
 use crate::editor::document::{BlockId, BlockInfo, BlockKind, PageDocument, StableCursor};
+use crate::page_layout::{PAGE_WIDTH, PageWidth};
 use block_layout::BlockLayout;
 use rich_text::{Marks, RichText};
 
 /// The key context the editor binds its keys in; commands scoped to the editor use it too.
 pub const KEY_CONTEXT: &str = "PageEditor";
 const CARET_BLINK_INTERVAL: Duration = Duration::from_millis(530);
-/// The widest a page's text runs.
-pub(crate) const CONTENT_MAX_WIDTH: Pixels = gpui::px(720.0);
 /// How far each nesting level of blocks is indented.
 pub(crate) const NEST_INDENT: Pixels = gpui::px(26.0);
 /// Width of the column holding a block's bullet, number or checkbox.
@@ -187,10 +189,17 @@ pub struct PageEditor {
     /// Popups opened from the page, such as a callout's emoji picker.
     popups: Entity<PopupHost>,
     callout_picker_subscription: Option<Subscription>,
+    code_highlights: syntax::CodeHighlights,
     drop_target: Option<drag_drop::DropTarget>,
+    /// The caret moved since the pointer last did, so the drag handle shows on the caret's
+    /// block rather than under a pointer that has not moved.
+    is_handle_at_caret: bool,
+    /// As last laid out, so a change of the setting re-measures the rows.
+    page_width: PageWidth,
     focus_handle: FocusHandle,
     is_caret_visible: bool,
     _blink_task: Task<()>,
+    _settings: Subscription,
 }
 
 impl EventEmitter<PageEditorEvent> for PageEditor {}
@@ -245,10 +254,14 @@ impl PageEditor {
             completion: None,
             popups: cx.new(|_| PopupHost::new()),
             callout_picker_subscription: None,
+            code_highlights: syntax::CodeHighlights::default(),
             drop_target: None,
+            is_handle_at_caret: false,
+            page_width: PAGE_WIDTH.get(cx),
             focus_handle: cx.focus_handle(),
             is_caret_visible: true,
             _blink_task: Task::ready(()),
+            _settings: cx.observe_global::<Settings>(Self::follow_page_width),
         }
     }
 
@@ -529,6 +542,7 @@ impl PageEditor {
     fn restart_caret_blink(&mut self, cx: &mut Context<Self>) {
         self.is_caret_visible = true;
         self.needs_caret_revealed = true;
+        self.is_handle_at_caret = true;
         self._blink_task = cx.spawn(async move |editor, cx| {
             loop {
                 cx.background_executor().timer(CARET_BLINK_INTERVAL).await;

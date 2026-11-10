@@ -1,5 +1,5 @@
-//! The appearance preferences (theme and motion), and this Mac's window frame in the data
-//! directory, which is state rather than a preference. What belongs to one workspace is in
+//! The appearance preferences (theme and motion), and this Mac's window frame and sidebar width
+//! in the data directory, which are state rather than preferences. What belongs to one workspace is in
 //! `workspace::settings`.
 
 use std::path::{Path, PathBuf};
@@ -116,6 +116,8 @@ pub struct WindowFrame {
 #[serde(default)]
 pub struct AppSettings {
     pub window: Option<WindowFrame>,
+    /// The sidebar's width as last dragged; unset until it is first resized.
+    pub sidebar_width: Option<f32>,
 }
 
 impl AppSettings {
@@ -158,6 +160,7 @@ mod tests {
                 width: 900.0,
                 height: 700.0,
             }),
+            sidebar_width: Some(320.0),
         };
         settings.save(&directory).unwrap();
         assert_eq!(AppSettings::load(&directory), settings);

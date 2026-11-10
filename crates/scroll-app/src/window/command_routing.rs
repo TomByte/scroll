@@ -6,6 +6,7 @@ use crate::accounts::{Accounts, OpenWorkspace, flows, request_open_workspace};
 use crate::commands::{PageKind, Run, Situation, Surface, Target};
 use crate::mcp::CopyConnectionCommand;
 use crate::page::commands::{PageCommand, RenamePage};
+use crate::page_layout::PAGE_WIDTH;
 use crate::palette::commands::OpenPalette;
 use crate::palette::{CommandPalette, PaletteEvent, PaletteSetup};
 use crate::settings::{OpenSettings, SettingsPage};
@@ -140,6 +141,7 @@ impl AppWindow {
             WindowCommand::GoBack => self.go_back(window, cx),
             WindowCommand::GoForward => self.go_forward(window, cx),
             WindowCommand::ToggleSidebar => self.toggle_sidebar(cx),
+            WindowCommand::TogglePageWidth => PAGE_WIDTH.set(PAGE_WIDTH.get(cx).toggled(), cx),
             WindowCommand::Theme(preference) => THEME.set(*preference, cx),
             WindowCommand::Close => window.remove_window(),
             WindowCommand::Quit => cx.quit(),

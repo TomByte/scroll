@@ -3,6 +3,7 @@
 use crate::accounts::commands::AccountRequest;
 use crate::accounts::flows;
 use crate::commands::hint;
+use crate::page_layout::{PAGE_WIDTH, PageWidth};
 use crate::sync_status::status_text;
 use crate::title_bar::{self, TRAFFIC_LIGHTS_WIDTH};
 use crate::window::commands::{GO_BACK, GO_FORWARD};
@@ -101,7 +102,30 @@ impl AppWindow {
             )
             .children(self.render_people(theme, cx))
             .children(self.render_connection(theme, cx))
+            .children(self.render_page_width_toggle(cx))
             .into_any_element()
+    }
+
+    /// Flips the page width setting; shown only for a document, as databases always fill the
+    /// window.
+    fn render_page_width_toggle(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let page = self.page.as_ref()?.read(cx);
+        if page.database_view().is_some() {
+            return None;
+        }
+        let is_full = PAGE_WIDTH.get(cx) == PageWidth::Full;
+        Some(
+            IconButton::new("page-width", IconName::ArrowLeftRight)
+                .size(ButtonSize::Small)
+                .tooltip(if is_full {
+                    "Narrow the page to a column"
+                } else {
+                    "Use the full width of the window"
+                })
+                .when(is_full, IconButton::selected)
+                .on_click(|_, _, cx| PAGE_WIDTH.set(PAGE_WIDTH.get(cx).toggled(), cx))
+                .into_any_element(),
+        )
     }
 
     /// Everyone else on the open page, as overlapping avatars.

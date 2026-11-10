@@ -16,7 +16,8 @@ pub(crate) use appearance::Themes;
 pub use appearance::{follow_system_appearance, follow_system_in_window, force_window_appearance};
 pub use swatches::SWATCH_COUNT;
 pub use tokens::{
-    Appearance, Fonts, Radii, Scale, SemanticColors, Shadows, Sizes, Spacing, TextSize, TypeScale,
+    Appearance, Fonts, Radii, Scale, SemanticColors, Shadows, Sizes, Spacing, SyntaxColors,
+    TextSize, TypeScale,
 };
 
 #[derive(Clone, Debug)]
@@ -25,6 +26,8 @@ pub struct Theme {
     /// Applied to whole controls when they are disabled.
     pub disabled_opacity: f32,
     pub colors: SemanticColors,
+    /// Code block highlighting.
+    pub syntax: SyntaxColors,
     pub spacing: Spacing,
     pub text: TypeScale,
     pub radius: Radii,

@@ -45,3 +45,5 @@ rcgen = "0.14"
 time = "0.3"
 jsonwebtoken = { version = "11", default-features = false, features = ["rust_crypto"] }
 base64 = "0.22"
+# Code block highlighting: Sublime grammars, with the pure-Rust regex engine (no Oniguruma C build).
+syntect = { version = "5.2", default-features = false, features = ["default-syntaxes", "regex-fancy"] }

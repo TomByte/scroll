@@ -6,7 +6,7 @@ use gpui::{Entity, TestAppContext, VisualTestContext};
 
 use super::rich_text::MarkKind;
 use super::{PageEditor, Selection, init};
-use crate::editor::document::{BlockId, PageDocument};
+use crate::editor::document::{BlockId, PageDocument, Placement};
 
 fn open_editor<'a>(
     paragraphs: &[&str],
@@ -428,4 +428,131 @@ fn copied_blocks_paste_with_kinds_and_marks(cx: &mut TestAppContext) {
         .and_then(|item| item.text())
         .unwrap();
     assert_eq!(copied, "# Title\n- [x] done **bold**\n  - child");
+}
+
+#[gpui::test]
+fn after_enter_the_drag_handle_follows_the_caret_until_the_pointer_moves(cx: &mut TestAppContext) {
+    let (editor, cx) = open_editor(&["one"], cx);
+    let pointer = gpui::point(gpui::px(100.0), gpui::px(100.0));
+    let handle_at_caret = |cx: &mut VisualTestContext| {
+        editor.read_with(cx, |editor, _| editor.block_with_handle_at_caret())
+    };
+    cx.simulate_mouse_move(pointer, None, gpui::Modifiers::none());
+    assert_eq!(handle_at_caret(cx), None, "the pointer decides");
+
+    cx.simulate_keystrokes("cmd-down enter");
+    assert_eq!(handle_at_caret(cx), Some(block(&editor, 1, cx)));
+
+    cx.simulate_mouse_move(
+        pointer + gpui::point(gpui::px(1.0), gpui::px(0.0)),
+        None,
+        gpui::Modifiers::none(),
+    );
+    assert_eq!(handle_at_caret(cx), None);
+}
+
+#[gpui::test]
+fn dragging_from_one_block_into_another_selects_the_blocks_between(cx: &mut TestAppContext) {
+    let (editor, cx) = open_editor(&["one", "two", "three"], cx);
+    cx.run_until_parked();
+    let centre = |index: usize, cx: &mut VisualTestContext| {
+        editor.read_with(cx, |editor, _| {
+            editor.blocks[index]
+                .layout
+                .as_ref()
+                .unwrap()
+                .bounds()
+                .center()
+        })
+    };
+    let selected = |cx: &mut VisualTestContext| {
+        editor.read_with(cx, |editor, _| editor.selected_block_range())
+    };
+    let (first, third) = (centre(0, cx), centre(2, cx));
+    let left = gpui::MouseButton::Left;
+    let none = gpui::Modifiers::none();
+
+    cx.simulate_mouse_down(first, left, none);
+    cx.simulate_mouse_move(third, Some(left), none);
+    assert_eq!(selected(cx), Some(0..3));
+    cx.simulate_mouse_move(first, Some(left), none);
+    assert_eq!(
+        selected(cx),
+        None,
+        "back in the first block it selects text again"
+    );
+    cx.simulate_mouse_move(third, Some(left), none);
+    cx.simulate_mouse_up(third, left, none);
+    assert_eq!(selected(cx), Some(0..3));
+
+    cx.simulate_keystrokes("backspace");
+    assert_eq!(texts(&editor, cx), [""]);
+    cx.simulate_keystrokes("cmd-z");
+    assert_eq!(
+        texts(&editor, cx),
+        ["one", "two", "three"],
+        "deleting the selection is one undo step"
+    );
+}
+
+#[gpui::test]
+fn shift_click_selects_the_blocks_up_to_the_one_clicked(cx: &mut TestAppContext) {
+    let (editor, cx) = open_editor(&["one", "two", "three"], cx);
+    cx.run_until_parked();
+    let third = editor.read_with(cx, |editor, _| {
+        editor.blocks[2].layout.as_ref().unwrap().bounds().center()
+    });
+    cx.simulate_click(third, gpui::Modifiers::shift());
+    assert_eq!(
+        editor.read_with(cx, |editor, _| editor.selected_block_range()),
+        Some(0..3)
+    );
+}
+
+#[gpui::test]
+fn moving_a_selection_of_blocks_keeps_their_order_and_nesting_and_undoes_in_one_step(
+    cx: &mut TestAppContext,
+) {
+    let (editor, cx) = open_editor(&["one", "two", "three", "four"], cx);
+    cx.simulate_keystrokes("right right right right right right right right tab");
+    cx.simulate_input("!");
+    // Loro folds edits made within its merge interval into one undo step.
+    std::thread::sleep(std::time::Duration::from_millis(700));
+    cx.simulate_keystrokes("left left escape shift-down");
+    let last = block(&editor, 3, cx);
+
+    editor.update(cx, |editor, cx| {
+        let selected = editor.target_blocks();
+        editor.move_dragged(&selected, Placement::After(last), cx)
+    });
+
+    assert_eq!(texts(&editor, cx), ["one", "four", "two", "!three"]);
+    let depths: Vec<usize> = editor.read_with(cx, |editor, _| {
+        editor.blocks.iter().map(|block| block.info.depth).collect()
+    });
+    assert_eq!(
+        depths,
+        [0, 0, 0, 1],
+        "the nested block moved with its parent"
+    );
+    assert_eq!(
+        editor.read_with(cx, |editor, _| editor.selected_block_range()),
+        Some(2..4),
+        "the moved blocks stay selected"
+    );
+    cx.simulate_keystrokes("cmd-z");
+    assert_eq!(texts(&editor, cx), ["one", "two", "!three", "four"]);
+}
+
+#[gpui::test]
+fn the_page_width_setting_reaches_an_open_editor(cx: &mut TestAppContext) {
+    use crate::page_layout::{PAGE_WIDTH, PageWidth};
+
+    let (editor, cx) = open_editor(&["wide"], cx);
+    cx.update(|_, cx| PAGE_WIDTH.set(PageWidth::Full, cx));
+    cx.run_until_parked();
+    assert_eq!(
+        editor.read_with(cx, |editor, _| editor.page_width),
+        PageWidth::Full
+    );
 }

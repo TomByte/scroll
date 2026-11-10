@@ -201,6 +201,18 @@ impl PageDocument {
         self.doc.set_block_icon(block, icon)
     }
 
+    /// A code block's language id, if one was chosen.
+    pub fn block_language(&self, block: BlockId) -> Option<String> {
+        self.doc
+            .block(block)
+            .ok()
+            .and_then(|block| block.language.clone())
+    }
+
+    pub fn set_block_language(&self, block: BlockId, language: Option<&str>) -> PageResult<()> {
+        self.doc.set_block_language(block, language)
+    }
+
     pub fn set_kind(&self, block: BlockId, kind: BlockKind) -> PageResult<()> {
         self.doc.set_block_kind(block, kind)
     }

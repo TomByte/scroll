@@ -7,7 +7,8 @@ use loro::{LoroMap, LoroText, LoroValue, TextDelta, TreeParentId, ValueOrContain
 
 use super::text::{TextSpan, read_spans, to_unicode_offset};
 use super::{
-    BlockId, CHECKED_KEY, ICON_KEY, KIND_KEY, PageDoc, PageDocError, TEXT_KEY, lock, text_of,
+    BlockId, CHECKED_KEY, ICON_KEY, KIND_KEY, LANGUAGE_KEY, PageDoc, PageDocError, TEXT_KEY, lock,
+    text_of,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -86,6 +87,9 @@ pub struct Block {
     pub is_checked: bool,
     /// An emoji shown with the block, used by callouts. Kept across kind changes.
     pub icon: Option<String>,
+    /// A code block's language, as a short lowercase id such as "rust"; `None` is plain text.
+    /// Kept across kind changes.
+    pub language: Option<String>,
     pub text: String,
     pub spans: Vec<TextSpan>,
 }
@@ -203,6 +207,21 @@ impl PageDoc {
         match icon {
             Some(icon) => meta.insert(ICON_KEY, icon)?,
             None => meta.delete(ICON_KEY)?,
+        }
+        self.doc.commit();
+        Ok(())
+    }
+
+    /// Sets or, with `None`, removes the block's code language.
+    pub fn set_block_language(
+        &self,
+        id: BlockId,
+        language: Option<&str>,
+    ) -> Result<(), PageDocError> {
+        let meta = self.block_meta(id)?;
+        match language {
+            Some(language) => meta.insert(LANGUAGE_KEY, language)?,
+            None => meta.delete(LANGUAGE_KEY)?,
         }
         self.doc.commit();
         Ok(())
@@ -347,6 +366,7 @@ impl PageDoc {
             kind: read_kind(&meta),
             is_checked: read_is_checked(&meta),
             icon: read_icon(&meta),
+            language: read_language(&meta),
             text: block_text.to_string(),
             spans: read_spans(&block_text),
         })
@@ -423,6 +443,13 @@ fn read_is_checked(meta: &LoroMap) -> bool {
 fn read_icon(meta: &LoroMap) -> Option<String> {
     match meta.get(ICON_KEY) {
         Some(ValueOrContainer::Value(LoroValue::String(icon))) => Some(icon.to_string()),
+        _ => None,
+    }
+}
+
+fn read_language(meta: &LoroMap) -> Option<String> {
+    match meta.get(LANGUAGE_KEY) {
+        Some(ValueOrContainer::Value(LoroValue::String(language))) => Some(language.to_string()),
         _ => None,
     }
 }

@@ -38,6 +38,7 @@ icons! {
     Archive => "archive",
     Calendar => "calendar",
     ArrowLeft => "arrow_left",
+    ArrowLeftRight => "arrow_left_right",
     ArrowRight => "arrow_right",
     Callout => "callout",
     Check => "check",

@@ -102,7 +102,9 @@ impl PageEditor {
         self.move_dragged(&dragged.blocks, target.placement, cx);
     }
 
-    /// Moves `blocks`, in order, so the first lands at `placement` and the rest follow it.
+    /// Moves `blocks`, in order, so the first lands at `placement` and the rest follow it. The
+    /// moves are one edit, so one undo step. A block selection that was moved (by dragging one
+    /// of its blocks' handle) stays selected.
     pub(super) fn move_dragged(
         &mut self,
         blocks: &[BlockId],
@@ -110,6 +112,9 @@ impl PageEditor {
         cx: &mut Context<Self>,
     ) {
         let selection = self.selection;
+        let moved_selection = self
+            .block_selection
+            .filter(|_| blocks == self.target_blocks().as_slice());
         self.apply_edit(cx, |page| {
             let mut placement = placement;
             for block in blocks {
@@ -118,6 +123,9 @@ impl PageEditor {
             }
             Ok(selection)
         });
+        if moved_selection.is_some() {
+            self.block_selection = moved_selection;
+        }
     }
 
     pub(super) fn clear_drop_target(&mut self, cx: &mut Context<Self>) {

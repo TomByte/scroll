@@ -71,6 +71,18 @@ pub struct SemanticColors {
     pub collaborators: [Hsla; 4],
 }
 
+/// What each kind of code token is drawn in; anything else is drawn in `text`.
+#[derive(Clone, Debug)]
+pub struct SyntaxColors {
+    pub keyword: Hsla,
+    pub string: Hsla,
+    pub comment: Hsla,
+    /// Numbers and built-in values such as `true` or `self`.
+    pub constant: Hsla,
+    pub function: Hsla,
+    pub type_name: Hsla,
+}
+
 #[derive(Clone, Debug)]
 pub struct Spacing {
     pub xxs: Pixels,
@@ -151,6 +163,8 @@ pub struct Sizes {
 pub struct Shadows {
     /// Barely-there lift for raised controls such as secondary buttons.
     pub raised: Vec<BoxShadow>,
+    /// One soft, faint layer with no spread: panels already have a border, and a panel fading
+    /// in shows anything drawn under it, so a dark or stacked shadow reads as a smudge.
     pub popover: Vec<BoxShadow>,
     pub modal: Vec<BoxShadow>,
 }

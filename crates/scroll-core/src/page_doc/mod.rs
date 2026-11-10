@@ -29,6 +29,7 @@ const BLOCKS: &str = "blocks";
 const KIND_KEY: &str = "kind";
 const CHECKED_KEY: &str = "checked";
 const ICON_KEY: &str = "icon";
+const LANGUAGE_KEY: &str = "language";
 const TEXT_KEY: &str = "text";
 
 #[derive(Debug, thiserror::Error)]

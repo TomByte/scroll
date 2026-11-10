@@ -1,5 +1,7 @@
-//! Selecting whole blocks: Escape selects the current block, Shift+arrows extend, and the
-//! selection can be deleted, copied, cut, indented or moved as a unit.
+//! Selecting whole blocks: Escape selects the current block, Shift+arrows extend, dragging
+//! across blocks or shift-clicking another block selects the range, and the selection can be
+//! deleted, copied, cut, indented or moved (with the keyboard or by a selected block's handle)
+//! as a unit.
 
 use std::ops::Range;
 
@@ -31,6 +33,22 @@ impl PageEditor {
             head: block,
         });
         cx.notify();
+    }
+
+    /// Selects the blocks from `anchor` to `head`, as dragging across them or shift-clicking
+    /// does.
+    pub(super) fn select_block_range(
+        &mut self,
+        anchor: BlockId,
+        head: BlockId,
+        cx: &mut Context<Self>,
+    ) {
+        let selection = Some(BlockSelection { anchor, head });
+        if self.block_selection != selection {
+            self.block_selection = selection;
+            self.completion = None;
+            cx.notify();
+        }
     }
 
     /// Indices (in document order) of the selected blocks.

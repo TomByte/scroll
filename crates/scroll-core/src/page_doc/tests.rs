@@ -626,3 +626,23 @@ fn a_block_icon_is_set_kept_across_kinds_synced_and_removed() {
     doc.set_block_icon(id, None).unwrap();
     assert_eq!(doc.blocks().unwrap()[0].icon, None);
 }
+
+#[test]
+fn a_code_language_is_set_kept_across_kinds_synced_and_removed() {
+    let doc = PageDoc::new();
+    let id = block_with_text(&doc, BlockPlacement::LastChildOf(None), "fn main() {}");
+    // Documents written before languages existed read as plain text.
+    assert_eq!(doc.block(id).unwrap().language, None);
+
+    doc.set_block_kind(id, BlockKind::Code).unwrap();
+    doc.set_block_language(id, Some("rust")).unwrap();
+    assert_eq!(doc.blocks().unwrap()[0].language.as_deref(), Some("rust"));
+    doc.set_block_kind(id, BlockKind::Paragraph).unwrap();
+    assert_eq!(doc.block(id).unwrap().language.as_deref(), Some("rust"));
+
+    let replica = PageDoc::from_snapshot(&doc.export_snapshot().unwrap()).unwrap();
+    assert_eq!(replica.block(id).unwrap().language.as_deref(), Some("rust"));
+
+    doc.set_block_language(id, None).unwrap();
+    assert_eq!(doc.blocks().unwrap()[0].language, None);
+}

@@ -126,6 +126,10 @@ pub struct CommandPalette {
     target: Target,
     step: Step,
     items: Vec<Item>,
+    /// The instant results of a query whose pages are still being searched for. The list on
+    /// screen stays as it was until the pages arrive and join these, so it does not empty and
+    /// refill on every keystroke.
+    pending_items: Option<Vec<Item>>,
     highlighted: usize,
     scroll: ScrollHandle,
     search: Task<()>,
@@ -165,7 +169,7 @@ impl CommandPalette {
         let subscription =
             cx.subscribe_in(&input, window, |palette, _, event, _, cx| match event {
                 TextInputEvent::Changed => palette.query_changed(cx),
-                TextInputEvent::Submitted => palette.choose(palette.highlighted, cx),
+                TextInputEvent::Submitted => palette.submit(cx),
                 TextInputEvent::Cancelled => {}
             });
         let storage = setup.workspace.read(cx).storage().clone();
@@ -183,6 +187,7 @@ impl CommandPalette {
             },
             step: Step::Search,
             items: Vec::new(),
+            pending_items: None,
             highlighted: 0,
             scroll: ScrollHandle::new(),
             search: Task::ready(()),
@@ -204,15 +209,38 @@ impl CommandPalette {
 
     fn query_changed(&mut self, cx: &mut Context<Self>) {
         let query = self.query(cx);
-        self.items = match &self.step {
+        let items = match &self.step {
             Step::Search => self.search_items(&query, cx),
             Step::Choose { command, .. } => self.choice_items(command, &query, cx),
             Step::TaggedPages(pages) => tagged_page_items(pages, &query),
         };
+        match self.page_search_words(&query) {
+            Some(words) => {
+                self.pending_items = Some(items);
+                self.search_pages_in_background(words, query, cx);
+            }
+            None => {
+                self.search = Task::ready(());
+                self.show(items, cx);
+            }
+        }
+    }
+
+    fn show(&mut self, items: Vec<Item>, cx: &mut Context<Self>) {
+        self.pending_items = None;
+        self.items = items;
         self.highlighted = 0;
         self.scroll.scroll_to_item(0);
         cx.notify();
-        self.search_pages_in_background(&query, cx);
+    }
+
+    /// Return acts on what is typed now: while its pages are still being searched for, on the
+    /// results already known, never on the previous query's list still on screen.
+    fn submit(&mut self, cx: &mut Context<Self>) {
+        if let Some(items) = self.pending_items.take() {
+            self.show(items, cx);
+        }
+        self.choose(self.highlighted, cx);
     }
 
     fn is_choosing(&self) -> bool {
@@ -400,7 +428,84 @@ impl Render for CommandPalette {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use gpui::{TestAppContext, VisualTestContext};
+
     use super::*;
+    use crate::app::first_run;
+
+    fn open_palette(cx: &mut TestAppContext) -> (Entity<CommandPalette>, &mut VisualTestContext) {
+        cx.update(scroll_ui::init);
+        let path =
+            std::env::temp_dir().join(format!("scroll-palette-{}.sqlite", PageId::generate().0));
+        let storage = Storage::open(&path).unwrap();
+        let records = first_run::seed(&storage);
+        let workspace = cx.new(|_| Workspace::new(path, storage, records));
+        let (palette, cx) = cx.add_window_view(|window, cx| {
+            let setup = PaletteSetup {
+                current_page: None,
+                commands: crate::window::command_list::all(),
+                workspace,
+                situation: Situation::default(),
+                usage: CommandUsage::new(),
+                recent_pages: Vec::new(),
+                prefix: "",
+                command: None,
+            };
+            CommandPalette::new(setup, window, cx)
+        });
+        palette.update_in(cx, |palette, window, cx| {
+            window.focus(&palette.focus_handle(cx));
+        });
+        (palette, cx)
+    }
+
+    fn page_titles(palette: &Entity<CommandPalette>, cx: &mut VisualTestContext) -> Vec<String> {
+        palette.read_with(cx, |palette, _| {
+            palette
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    Item::Page { title, .. } => Some(title.to_string()),
+                    _ => None,
+                })
+                .collect()
+        })
+    }
+
+    #[gpui::test]
+    fn typing_keeps_the_last_results_until_the_new_pages_arrive(cx: &mut TestAppContext) {
+        let (palette, cx) = open_palette(cx);
+        cx.simulate_input("road");
+        cx.executor().advance_clock(Duration::from_millis(50));
+        cx.run_until_parked();
+        assert!(page_titles(&palette, cx).contains(&"Roadmap".to_string()));
+
+        cx.simulate_input("m");
+        assert!(
+            page_titles(&palette, cx).contains(&"Roadmap".to_string()),
+            "the list is not emptied while the search runs"
+        );
+        cx.executor().advance_clock(Duration::from_millis(50));
+        cx.run_until_parked();
+        assert!(page_titles(&palette, cx).contains(&"Roadmap".to_string()));
+        assert!(palette.read_with(cx, |palette, _| palette.pending_items.is_none()));
+    }
+
+    #[gpui::test]
+    fn return_acts_on_the_query_typed_not_the_list_still_on_screen(cx: &mut TestAppContext) {
+        let (palette, cx) = open_palette(cx);
+        cx.simulate_input("road");
+        cx.executor().advance_clock(Duration::from_millis(50));
+        cx.run_until_parked();
+        cx.simulate_input("xyzzy");
+        cx.simulate_keystrokes("enter");
+        assert!(
+            page_titles(&palette, cx).is_empty(),
+            "the stale Roadmap row is gone, so Return could not open it"
+        );
+    }
 
     #[test]
     fn prefixes_pick_a_mode() {

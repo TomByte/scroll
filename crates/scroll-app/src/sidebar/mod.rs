@@ -2,6 +2,7 @@
 //! menu, and the trash. All tree logic lives in `workspace::page_tree`; this view only maps
 //! pointer and keyboard input onto it.
 
+mod resize;
 mod rows;
 mod tags;
 mod trash;
@@ -19,7 +20,8 @@ use scroll_core::id::{PageId, TagId};
 use scroll_core::record::Page;
 use scroll_ui::{
     EmptyState, Icon, IconName, IconSize, ListItem, Menu, MenuItem, PopupAnchor, PopupHost,
-    Scrollbar, SectionHeader, TextInput, TextInputEvent, Theme, TitlebarDragArea, Transition,
+    ResizeHandle, Scrollbar, SectionHeader, TextInput, TextInputEvent, Theme, TitlebarDragArea,
+    Transition,
 };
 
 use crate::accounts::switcher::{current_workspace_name, switcher_menu};
@@ -39,6 +41,8 @@ pub enum SidebarEvent {
     ExpandedChanged,
     /// Runs command `id` for a page (`None` is the open page), e.g. from the page menu.
     RunCommand(&'static str, Option<PageId>),
+    /// The person finished dragging the sidebar to this width.
+    Resized(Pixels),
 }
 
 #[derive(Clone)]
@@ -78,12 +82,13 @@ pub struct Sidebar {
     requested: HashSet<PageId>,
     scroll: UniformListScrollHandle,
     focus_handle: FocusHandle,
+    width: Pixels,
+    resizing: Option<resize::Resizing>,
     _subscription: Subscription,
 }
 
 /// The most tagged pages the sidebar lists; the palette's `#` mode finds the rest.
 const TAGGED_LIMIT: usize = 200;
-pub(crate) const SIDEBAR_WIDTH: Pixels = gpui::px(248.0);
 /// The tag list scrolls past this, leaving the page tree most of the height.
 const TAG_LIST_MAX_HEIGHT: Pixels = gpui::px(248.0);
 
@@ -135,6 +140,8 @@ impl Sidebar {
             requested: HashSet::new(),
             scroll: UniformListScrollHandle::new(),
             focus_handle: cx.focus_handle(),
+            width: resize::DEFAULT_WIDTH,
+            resizing: None,
             _subscription: subscription,
         };
         sidebar.load_expanded_children(cx);
@@ -176,6 +183,16 @@ impl Sidebar {
         let rows = Rc::new(self.workspace.read(cx).tree().visible_rows(&self.expanded));
         self.rows = Some(rows.clone());
         rows
+    }
+
+    /// Starts at `width` (as the person last left it), within the sidebar's limits.
+    pub fn with_width(mut self, width: Pixels) -> Self {
+        self.width = resize::clamp_width(width);
+        self
+    }
+
+    pub fn width(&self) -> Pixels {
+        self.width
     }
 
     pub fn expanded(&self) -> &HashSet<PageId> {
@@ -368,7 +385,7 @@ impl Render for Sidebar {
             .flex_col()
             .flex_none()
             .h_full()
-            .w(SIDEBAR_WIDTH)
+            .w(self.width)
             .bg(theme.colors.surface_secondary)
             .border_r(theme.size.border_width)
             .border_color(theme.colors.border)
@@ -481,5 +498,11 @@ impl Render for Sidebar {
             )
             .child(div().py(theme.spacing.sm).child(trash))
             .child(self.popups.clone())
+            .child(ResizeHandle::new("sidebar-resize").on_press(cx.listener(
+                |sidebar, event: &gpui::MouseDownEvent, _, cx| sidebar.start_resizing(event, cx),
+            )))
+            .when(self.resizing.is_some(), |sidebar| {
+                sidebar.child(self.resize_tracker(cx))
+            })
     }
 }

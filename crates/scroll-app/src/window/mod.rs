@@ -67,14 +67,19 @@ impl AppWindow {
         let workspace_settings = WorkspaceSettings::load(workspace.read(cx).path());
         let expanded: HashSet<PageId> = workspace_settings.expanded_pages.iter().copied().collect();
         let overlays = Overlays::new(cx);
+        let sidebar_width = settings.sidebar_width.map(gpui::px);
         let sidebar = cx.new(|cx| {
-            Sidebar::new(
+            let sidebar = Sidebar::new(
                 workspace.clone(),
                 expanded,
                 command_list::all(),
                 overlays.clone(),
                 cx,
-            )
+            );
+            match sidebar_width {
+                Some(width) => sidebar.with_width(width),
+                None => sidebar,
+            }
         });
         let subscriptions = vec![
             cx.subscribe_in(&sidebar, window, Self::sidebar_event),
@@ -83,8 +88,10 @@ impl AppWindow {
             cx.observe_global::<Accounts>(|_, cx| cx.notify()),
             cx.observe_window_bounds(window, |this, window, _| this.remember_window_frame(window)),
             follow_system_appearance(window),
+            // The toolbar shows the page width setting, so any change redraws the window.
             cx.observe_global_in::<Settings>(window, |this, window, cx| {
-                this.apply_theme(window, cx)
+                this.apply_theme(window, cx);
+                cx.notify();
             }),
         ];
         let mut app_window = AppWindow {
@@ -194,6 +201,8 @@ impl AppWindow {
                     self.sidebar.read(cx).expanded().iter().copied().collect();
                 self.save_workspace_settings(cx);
             }
+            // Saved with the window frame when the app quits.
+            SidebarEvent::Resized(width) => self.settings.sidebar_width = Some(f32::from(*width)),
         }
     }
 
@@ -384,7 +393,7 @@ impl Render for AppWindow {
         let theme = Theme::current(window, cx);
         let sidebar_shown =
             scroll_ui::Transition::Sidebar.fraction_on("sidebar", self.is_sidebar_open, window, cx);
-        let sidebar_width = crate::sidebar::SIDEBAR_WIDTH * sidebar_shown;
+        let sidebar_width = self.sidebar.read(cx).width() * sidebar_shown;
         let page_shown = scroll_ui::Transition::Page.progress(
             "page-content",
             self.page.as_ref().map(Entity::entity_id),

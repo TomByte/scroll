@@ -4,7 +4,8 @@ use gpui::{BoxShadow, Hsla, hsla, point, px};
 
 use super::Theme;
 use super::tokens::{
-    Appearance, Fonts, Radii, Scale, SemanticColors, Shadows, Sizes, Spacing, TextSize, TypeScale,
+    Appearance, Fonts, Radii, Scale, SemanticColors, Shadows, Sizes, Spacing, SyntaxColors,
+    TextSize, TypeScale,
 };
 
 impl Theme {
@@ -85,16 +86,18 @@ impl Theme {
             appearance: Appearance::Light,
             disabled_opacity: 0.45,
             colors,
+            syntax: SyntaxColors {
+                keyword: hsl(356.0, 72.0, 47.0),
+                string: hsl(218.0, 83.0, 23.0),
+                comment: hsl(212.0, 8.0, 47.0),
+                constant: hsl(214.0, 94.0, 35.0),
+                function: hsl(262.0, 69.0, 59.0),
+                type_name: hsl(23.0, 100.0, 29.0),
+            },
             shadow: Shadows {
                 raised: vec![shadow(shadow_colour(0.05), 1.0, 2.0, 0.0)],
-                popover: vec![
-                    shadow(shadow_colour(0.06), 2.0, 4.0, -1.0),
-                    shadow(shadow_colour(0.10), 8.0, 24.0, -4.0),
-                ],
-                modal: vec![
-                    shadow(shadow_colour(0.08), 4.0, 12.0, -2.0),
-                    shadow(shadow_colour(0.18), 24.0, 64.0, -8.0),
-                ],
+                popover: vec![shadow(shadow_colour(0.10), 4.0, 8.0, 0.0)],
+                modal: vec![shadow(shadow_colour(0.14), 8.0, 16.0, 0.0)],
             },
             spacing: spacing(),
             text: type_scale(),
@@ -181,16 +184,18 @@ impl Theme {
             appearance: Appearance::Dark,
             disabled_opacity: 0.4,
             colors,
+            syntax: SyntaxColors {
+                keyword: hsl(4.0, 100.0, 72.0),
+                string: hsl(207.0, 100.0, 82.0),
+                comment: hsl(212.0, 9.0, 58.0),
+                constant: hsl(208.0, 100.0, 74.0),
+                function: hsl(270.0, 100.0, 83.0),
+                type_name: hsl(28.0, 100.0, 67.0),
+            },
             shadow: Shadows {
                 raised: vec![shadow(shadow_colour(0.25), 1.0, 2.0, 0.0)],
-                popover: vec![
-                    shadow(shadow_colour(0.25), 2.0, 6.0, -1.0),
-                    shadow(shadow_colour(0.40), 12.0, 32.0, -6.0),
-                ],
-                modal: vec![
-                    shadow(shadow_colour(0.30), 4.0, 12.0, -2.0),
-                    shadow(shadow_colour(0.55), 24.0, 72.0, -8.0),
-                ],
+                popover: vec![shadow(shadow_colour(0.28), 4.0, 8.0, 0.0)],
+                modal: vec![shadow(shadow_colour(0.36), 8.0, 16.0, 0.0)],
             },
             spacing: spacing(),
             text: type_scale(),
@@ -291,11 +296,29 @@ fn text_size(size: f32, line_height: f32) -> TextSize {
     }
 }
 
+/// GPUI takes `blur` as the Gaussian's standard deviation, about half what CSS calls the blur
+/// radius, so the shadow fades out over roughly three times `blur`.
 fn shadow(color: Hsla, offset_y: f32, blur: f32, spread: f32) -> BoxShadow {
     BoxShadow {
         color,
         offset: point(px(0.0), px(offset_y)),
         blur_radius: px(blur),
         spread_radius: px(spread),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn floating_panels_cast_one_soft_shadow_with_no_spread() {
+        for theme in [Theme::light(), Theme::dark()] {
+            for shadows in [&theme.shadow.popover, &theme.shadow.modal] {
+                assert_eq!(shadows.len(), 1, "{:?}: one layer", theme.appearance);
+                assert!(shadows[0].spread_radius >= px(0.0));
+                assert!(shadows[0].blur_radius <= px(16.0));
+            }
+        }
     }
 }

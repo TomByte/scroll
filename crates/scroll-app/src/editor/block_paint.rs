@@ -6,6 +6,7 @@ use super::PageEditor;
 use super::block_element::{BlockPaint, Placeholder, RemotePresence};
 use super::render::{is_heading, text_size};
 use super::rich_text::RunStyle;
+use super::syntax::colour_runs;
 use crate::editor::document::{BlockId, BlockKind};
 use gpui::{FontWeight, Hsla, SharedString, TextRun, font};
 use scroll_ui::Theme;
@@ -52,9 +53,18 @@ impl PageEditor {
         let shows_caret =
             is_selected_block && is_focused && self.is_caret_visible && selection_range.is_empty();
 
+        let runs = content.text_runs(&run_style, marked_range.as_ref());
+        let runs = if kind == BlockKind::Code {
+            let language = self.code_language(id);
+            let spans = self.code_highlights.spans(id, language, &content.text);
+            colour_runs(runs, &spans, &theme.syntax)
+        } else {
+            runs
+        };
+
         BlockPaint {
             text: SharedString::from(content.text.clone()),
-            runs: content.text_runs(&run_style, marked_range.as_ref()),
+            runs,
             font_size: text.size,
             line_height: text.line_height,
             selection: (is_selected_block && !selection_range.is_empty())

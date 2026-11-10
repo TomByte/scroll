@@ -464,6 +464,12 @@ impl PageEditor {
             _ if event.modifiers.shift && block == self.selection.block => {
                 self.extend_selection(offset, cx)
             }
+            _ if event.modifiers.shift => {
+                let anchor = self
+                    .block_selection
+                    .map_or(self.selection.block, |selection| selection.anchor);
+                self.select_block_range(anchor, block, cx);
+            }
             _ => {
                 self.is_dragging = true;
                 self.move_caret(block, offset, cx);
@@ -490,25 +496,49 @@ impl PageEditor {
         }
     }
 
+    /// Any pointer movement gives the drag handle back to the pointer. While a press that began
+    /// in a block's text is held, it selects text within that block, or whole blocks from it to
+    /// the block under the pointer once the pointer leaves it.
     pub(super) fn mouse_drag(
         &mut self,
         event: &MouseMoveEvent,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if std::mem::take(&mut self.is_handle_at_caret) {
+            cx.notify();
+        }
         if !self.is_dragging {
             return;
         }
+        let origin = self.selection.block;
+        let over = self.block_at_height(event.position.y).unwrap_or(origin);
+        if over != origin {
+            return self.select_block_range(origin, over, cx);
+        }
         let Some(layout) = self
-            .block_state(self.selection.block)
+            .block_state(origin)
             .and_then(|state| state.layout.as_ref())
         else {
             return;
         };
         let head = layout.offset_for_point(event.position);
-        if head != self.selection.range.head {
+        if self.block_selection.is_some() || head != self.selection.range.head {
             self.extend_selection(head, cx);
         }
+    }
+
+    /// The block whose row is at window height `y`, judged by the blocks laid out in the last
+    /// frame (only those on screen are): the last one starting above `y`, so the gap between two
+    /// blocks, and a divider, count as the block above.
+    fn block_at_height(&self, y: Pixels) -> Option<BlockId> {
+        self.blocks
+            .iter()
+            .filter(|state| state.layout_frame == self.frame)
+            .filter_map(|state| Some((state.info.id, state.layout.as_ref()?.bounds().top())))
+            .take_while(|(_, top)| *top <= y)
+            .last()
+            .map(|(block, _)| block)
     }
 
     pub(super) fn mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {

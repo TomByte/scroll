@@ -16,7 +16,7 @@ use crate::accounts::{self, Accounts, OpenWorkspace};
 use crate::commands::{self, RunCommand};
 use crate::window::{AppWindow, command_list, settings};
 use crate::workspace::Workspace;
-use crate::{editor, logger, mcp};
+use crate::{editor, logger, mcp, page_layout};
 use paths::data_directory;
 
 /// The windows the app has open. Lives as long as the app.
@@ -131,6 +131,7 @@ fn set_up_ui(cx: &mut App) {
     scroll_table::init(cx);
     editor::init(cx);
     scroll_settings::register(settings::SETTINGS, cx);
+    scroll_settings::register(page_layout::SETTINGS, cx);
     scroll_settings::register(mcp::SETTINGS, cx);
     settings::follow_motion(cx);
     mcp::init(cx);

@@ -8,7 +8,7 @@ use gpui::{
 use scroll_core::id::PageId;
 use scroll_ui::{
     Button, ButtonSize, ButtonVariant, Clickable, EmojiPicker, EmojiPickerEvent, PopupAnchor,
-    PopupHost, TextSize, Theme,
+    PopupHost, Theme,
 };
 
 use crate::workspace::{Workspace, WorkspaceEvent};
@@ -88,14 +88,23 @@ impl Render for PageIcon {
         let theme = Theme::current(window, cx);
         let trigger = match self.icon(cx) {
             Some(icon) => {
+                let font_size = theme.text.title.size * ICON_SCALE;
+                let image_size = font_size * EMOJI_IMAGE_SCALE;
                 let icon = div()
                     .id("page-icon")
                     .flex()
-                    .w(icon_size(&theme).line_height)
+                    .items_center()
+                    .justify_center()
+                    .size(image_size + theme.spacing.sm * 2.0)
                     .rounded(theme.radius.md)
-                    .text_size(icon_size(&theme).size)
-                    .line_height(icon_size(&theme).line_height)
-                    .child(icon);
+                    .child(
+                        div()
+                            .relative()
+                            .left(-(font_size * EMOJI_IMAGE_OFFSET))
+                            .text_size(font_size)
+                            .line_height(image_size)
+                            .child(icon),
+                    );
                 Clickable::new(theme.radius.md)
                     .hover(theme.colors.hover)
                     .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
@@ -133,10 +142,10 @@ impl Render for PageIcon {
 
 /// A page's emoji is half as big again as its title.
 const ICON_SCALE: f32 = 1.5;
-
-fn icon_size(theme: &Theme) -> TextSize {
-    TextSize {
-        size: theme.text.title.size * ICON_SCALE,
-        line_height: theme.text.title.line_height * ICON_SCALE,
-    }
-}
+/// Apple Color Emoji, as measured through GPUI's text system at 48px: a glyph's image is
+/// 1.25em square, wider than the glyph's 1.08em advance, and starts 0.07em right of the pen.
+/// A box sized and centred by the advance therefore shows the image 0.15em right of centre
+/// and overhanging the box's right edge. The image is centred vertically in its line box
+/// whatever the line height, so a line as tall as the image fits it exactly.
+const EMOJI_IMAGE_SCALE: f32 = 1.25;
+const EMOJI_IMAGE_OFFSET: f32 = 0.15;

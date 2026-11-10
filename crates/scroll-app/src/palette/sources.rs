@@ -144,13 +144,12 @@ impl CommandPalette {
         }
     }
 
-    /// Asks the search index for pages on the storage thread; the answer joins the list if the
-    /// query has not changed meanwhile.
-    pub(super) fn search_pages_in_background(&mut self, query: &str, cx: &mut Context<Self>) {
+    /// The words to search the index for, if `query` lists pages from it.
+    pub(super) fn page_search_words(&self, query: &str) -> Option<String> {
         let words = match &self.step {
             Step::Search => match mode_of(query) {
-                (Mode::Everything | Mode::Pages, words) if !words.is_empty() => words.to_string(),
-                _ => return self.search = Task::ready(()),
+                (Mode::Everything | Mode::Pages, words) => words,
+                _ => return None,
             },
             Step::Choose { command, .. }
                 if matches!(
@@ -161,15 +160,21 @@ impl CommandPalette {
                     }
                 ) =>
             {
-                query.trim().to_string()
+                query.trim()
             }
-            _ => return self.search = Task::ready(()),
+            _ => return None,
         };
-        if words.is_empty() {
-            self.search = Task::ready(());
-            return;
-        }
-        let query = query.to_string();
+        (!words.is_empty()).then(|| words.to_string())
+    }
+
+    /// Asks the search index for pages on the storage thread; the answer joins the pending
+    /// results and replaces the list, if the query has not changed meanwhile.
+    pub(super) fn search_pages_in_background(
+        &mut self,
+        words: String,
+        query: String,
+        cx: &mut Context<Self>,
+    ) {
         let typed = std::time::Instant::now();
         let storage = self.storage.clone();
         self.search = cx.spawn(async move |palette, cx| {
@@ -183,20 +188,24 @@ impl CommandPalette {
                 Ok(searching) => searching,
                 Err(error) => return log::debug!("palette closed before searching: {error}"),
             };
-            let hits = match searching.await {
-                Ok(hits) => hits,
-                Err(error) => return log::warn!("search failed: {error}"),
-            };
-            let added = palette.update(cx, |palette, cx| {
+            // A failed search still shows the query's other results.
+            let hits = searching.await.unwrap_or_else(|error| {
+                log::warn!("search failed: {error}");
+                Vec::new()
+            });
+            let shown = palette.update(cx, |palette, cx| {
                 if palette.query(cx) != query {
                     return;
                 }
+                let Some(items) = palette.pending_items.take() else {
+                    return;
+                };
                 let count = hits.len();
+                palette.show(items, cx);
                 palette.add_page_hits(hits, &words, cx);
-                cx.notify();
                 log::debug!("timing: palette {query:?} showed {count} page results {:?} after the keystroke", typed.elapsed());
             });
-            if let Err(error) = added {
+            if let Err(error) = shown {
                 log::debug!("palette closed before search finished: {error}");
             }
         });
