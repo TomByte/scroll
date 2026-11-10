@@ -171,13 +171,16 @@ impl PageEditor {
         preview
             .on_mouse_down(
                 MouseButton::Left,
+                // A click selects the diagram as a block, to move, copy or delete it; only its
+                // Edit button shows the source.
                 cx.listener(move |editor, _, window, cx| {
                     cx.stop_propagation();
-                    editor.edit_diagram(block, window, cx);
+                    window.focus(&editor.focus_handle);
+                    editor.select_block_range(block, block, cx);
                 }),
             )
             .when(!self.is_read_only(), |preview| {
-                preview.cursor_pointer().child(
+                preview.child(
                     div()
                         .absolute()
                         .top(theme.spacing.xs)
