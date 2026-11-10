@@ -352,12 +352,15 @@ impl PageEditor {
             .cursor_grab()
             .map(|handle| match self.block_with_handle_at_caret() {
                 Some(caret_block) if caret_block == block.info.id => handle,
-                Some(_) => handle.invisible(),
+                // Transparent, not hidden: the handle sits in the gutter outside its block's row,
+                // so it has to notice the pointer itself or it would vanish as the pointer
+                // reached it.
+                Some(_) => handle.opacity(0.),
                 None => handle
-                    .invisible()
-                    .group_hover(group, |handle| handle.visible()),
+                    .opacity(0.)
+                    .group_hover(group, |handle| handle.opacity(1.)),
             })
-            .hover(|handle| handle.bg(theme.colors.hover))
+            .hover(|handle| handle.opacity(1.).bg(theme.colors.hover))
             .child(
                 Icon::new(IconName::Grip)
                     .size(IconSize::Small)
