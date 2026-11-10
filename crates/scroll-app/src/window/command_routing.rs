@@ -128,8 +128,10 @@ impl AppWindow {
             return request_open_workspace(open.index, cx);
         }
         if action.is::<OpenSettings>() {
-            // Opening it again would start it over: its entrance, and the category picked.
-            if self.overlays.showing::<SettingsPage>(cx).is_none() {
+            // The shortcut that opens the page also closes it.
+            if self.overlays.showing::<SettingsPage>(cx).is_some() {
+                self.overlays.dismiss_modal(window, cx);
+            } else {
                 self.overlays.show_modal(SettingsPage::new, window, cx);
             }
             return;

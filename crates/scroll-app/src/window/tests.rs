@@ -334,7 +334,7 @@ fn a_click_on_the_title_edits_it_again_after_typing_in_the_page(cx: &mut TestApp
 }
 
 #[gpui::test]
-fn the_settings_shortcut_works_with_nothing_focused_and_opens_only_one_page(
+fn the_settings_shortcut_works_with_nothing_focused_and_closes_the_page_too(
     cx: &mut TestAppContext,
 ) {
     use crate::settings::SettingsPage;
@@ -351,16 +351,14 @@ fn the_settings_shortcut_works_with_nothing_focused_and_opens_only_one_page(
 
     cx.simulate_keystrokes("cmd-,");
     cx.run_until_parked();
-    let first = page(cx).expect("the shortcut opens the page with nothing focused");
-    cx.simulate_keystrokes("cmd-,");
-    assert_eq!(
-        page(cx),
-        Some(first),
-        "pressing it again leaves the open page alone"
+    assert!(
+        page(cx).is_some(),
+        "the shortcut opens the page with nothing focused"
     );
-
-    cx.simulate_keystrokes("escape");
-    assert_eq!(page(cx), None);
     cx.simulate_keystrokes("cmd-,");
-    assert!(page(cx).is_some(), "it opens again after closing");
+    cx.run_until_parked();
+    assert!(page(cx).is_none(), "pressing it again closes the page");
+    cx.simulate_keystrokes("cmd-,");
+    cx.run_until_parked();
+    assert!(page(cx).is_some(), "and once more opens it again");
 }

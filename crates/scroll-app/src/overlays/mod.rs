@@ -45,6 +45,11 @@ impl Overlays {
             .update(cx, |modals, cx| modals.show(build, window, cx))
     }
 
+    pub fn dismiss_modal(&self, window: &mut Window, cx: &mut App) {
+        self.modals
+            .update(cx, |modals, cx| modals.dismiss(window, cx));
+    }
+
     pub fn showing<V: 'static>(&self, cx: &App) -> Option<Entity<V>> {
         self.modals.read(cx).showing::<V>()
     }
