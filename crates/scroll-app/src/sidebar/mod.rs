@@ -70,6 +70,8 @@ pub struct Sidebar {
     popups: Entity<PopupHost>,
     drop: Option<PageDrop>,
     is_trash_open: bool,
+    /// Whether the Tags section lists its tags; closed until its heading is clicked.
+    are_tags_shown: bool,
     /// Tags picked in the Tags section; the pages carrying all of them are listed.
     selected_tags: Vec<TagId>,
     /// The pages carrying every selected tag, read from the store (at most `TAGGED_LIMIT`).
@@ -133,6 +135,7 @@ impl Sidebar {
             popups: cx.new(|_| PopupHost::new()),
             drop: None,
             is_trash_open: false,
+            are_tags_shown: false,
             selected_tags: Vec::new(),
             tagged_pages: Vec::new(),
             trash: Vec::new(),

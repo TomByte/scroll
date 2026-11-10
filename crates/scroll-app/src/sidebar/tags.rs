@@ -3,13 +3,15 @@
 use crate::workspace::page_tree::display_title;
 use crate::workspace::tag_colors::{TAG_COLORS, swatch_of};
 use gpui::{
-    AnyElement, Context, ElementId, IntoElement, Pixels, Point, Styled, Window, div,
-    prelude::FluentBuilder,
+    AnyElement, Context, ElementId, InteractiveElement, IntoElement, ParentElement, Pixels, Point,
+    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder,
 };
 use scroll_core::id::{PageId, TagId};
 use scroll_core::operation::{RecordId, TagField, Transaction};
 use scroll_core::record::TagColor;
-use scroll_ui::{IconName, ListItem, Menu, MenuItem, PopupAnchor, SectionHeader, Theme};
+use scroll_ui::{
+    Icon, IconName, IconSize, ListItem, Menu, MenuItem, PopupAnchor, SectionHeader, Theme,
+};
 
 use super::*;
 use crate::overlays::prompt_dialog::PromptText;
@@ -28,6 +30,44 @@ impl Sidebar {
         }
         self.load_tagged_pages(cx);
         cx.notify();
+    }
+
+    /// Opens or closes the Tags section. Closing it lets go of the tags picked, so no list of
+    /// tagged pages is left behind with nothing showing why.
+    fn toggle_tags_shown(&mut self, cx: &mut Context<Self>) {
+        self.are_tags_shown = !self.are_tags_shown;
+        if !self.are_tags_shown {
+            self.selected_tags.clear();
+            self.tagged_pages.clear();
+        }
+        cx.notify();
+    }
+
+    fn render_tags_heading(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let chevron = if self.are_tags_shown {
+            IconName::ChevronDown
+        } else {
+            IconName::ChevronRight
+        };
+        let hover = theme.colors.hover;
+        div()
+            .id("sidebar-tags-heading")
+            .flex()
+            .items_end()
+            .justify_between()
+            .rounded(theme.radius.md)
+            .cursor_pointer()
+            .hover(move |heading| heading.bg(hover))
+            .on_click(cx.listener(|sidebar, _, _, cx| sidebar.toggle_tags_shown(cx)))
+            .child(SectionHeader::new("Tags"))
+            .child(
+                div().pr(theme.spacing.sm).pb(theme.spacing.xs).child(
+                    Icon::new(chevron)
+                        .size(IconSize::Small)
+                        .color(theme.colors.text_placeholder),
+                ),
+            )
+            .into_any_element()
     }
 
     /// Reads the pages carrying every selected tag on the storage thread.
@@ -129,7 +169,10 @@ impl Sidebar {
                 )
             })
             .collect();
-        let mut rows = vec![SectionHeader::new("Tags").into_any_element()];
+        let mut rows = vec![self.render_tags_heading(theme, cx)];
+        if !self.are_tags_shown {
+            return rows;
+        }
         for (id, name, color, count) in tags {
             let is_selected = self.selected_tags.contains(&id);
             let dot = theme.swatch(swatch_of(color));
