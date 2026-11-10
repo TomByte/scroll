@@ -4,16 +4,18 @@ use gpui::{
     Window, div, prelude::FluentBuilder,
 };
 
-use crate::controls::button::{Button, ButtonVariant};
+use crate::controls::button::{Button, ButtonSize, ButtonVariant};
 use crate::controls::form_field::FormField;
+use crate::controls::icon_button::IconButton;
 use crate::controls::text_input::TextInput;
-use crate::foundation::actions::{Confirm, DIALOG_CONTEXT};
+use crate::display::icon::IconName;
+use crate::foundation::actions::{Cancel, Confirm, DIALOG_CONTEXT};
 use crate::overlays::modal::Modal;
 use crate::theme::Theme;
 
 type ConfirmHandler = Box<dyn Fn(&mut Window, &mut App) + 'static>;
 
-/// A modal dialog: a title, an optional description, its content, a line saying what went
+/// A modal dialog: a title with a close button, an optional description, its content, a line saying what went
 /// wrong if anything did, and its buttons at the trailing edge. Show it through a `ModalLayer`.
 #[derive(IntoElement)]
 pub struct Dialog {
@@ -95,10 +97,18 @@ impl RenderOnce for Dialog {
                 .text_size(theme.text.ui.size)
                 .child(
                     div()
-                        .text_size(theme.text.heading_3.size)
-                        .line_height(theme.text.heading_3.line_height)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(self.title),
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(theme.spacing.lg)
+                        .child(
+                            div()
+                                .text_size(theme.text.heading_3.size)
+                                .line_height(theme.text.heading_3.line_height)
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(self.title),
+                        )
+                        .child(close_button()),
                 )
                 .when_some(self.description, |dialog, description| {
                     dialog.child(div().text_color(theme.colors.text_muted).child(description))
@@ -119,6 +129,15 @@ impl RenderOnce for Dialog {
                 }),
         )
     }
+}
+
+/// Closes the dialog the way Escape does, so the `ModalLayer` showing it handles both.
+fn close_button() -> IconButton {
+    IconButton::new("close-dialog", IconName::Close)
+        .variant(ButtonVariant::Ghost)
+        .size(ButtonSize::Small)
+        .tooltip("Close")
+        .on_click(|_, window, cx| window.dispatch_action(Box::new(Cancel), cx))
 }
 
 impl Dialog {

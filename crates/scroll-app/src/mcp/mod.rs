@@ -23,7 +23,7 @@ pub const SERVER_ENABLED: Setting<bool> = Setting {
     category: Category::Integrations,
     label: "MCP server",
     description: "Lets AI tools such as Claude Code read, search and edit the open workspace at \
-                  http://127.0.0.1:7465/mcp. Connect one with \"Copy MCP connection command\".",
+                  http://127.0.0.1:7465/mcp.",
     default: false,
 };
 

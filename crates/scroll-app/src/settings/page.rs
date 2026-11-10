@@ -5,12 +5,15 @@ use gpui::{
     AnyElement, App, Context, DismissEvent, EventEmitter, FocusHandle, Focusable, IntoElement,
     ParentElement, Render, Styled, Subscription, Window, div, prelude::FluentBuilder,
 };
-use scroll_settings::{AnySetting, Control, Settings};
+use scroll_settings::{AnySetting, Category, Control, Settings};
 use scroll_ui::{
     Button, ButtonSize, ButtonVariant, Dialog, Divider, SectionHeader, SegmentedControl, Switch,
     Theme,
 };
 use serde_json::Value;
+
+use crate::commands::RunCommand;
+use crate::mcp;
 
 pub struct SettingsPage {
     focus_handle: FocusHandle,
@@ -50,6 +53,10 @@ impl Render for SettingsPage {
                     .gap(theme.spacing.sm)
                     .child(SectionHeader::new(category.label()))
                     .children(settings.into_iter().map(|setting| row(setting, &theme, cx)))
+                    .when(
+                        category == Category::Integrations && mcp::SERVER_ENABLED.get(cx),
+                        |section| section.child(mcp_connection_row(&theme)),
+                    )
                     .when(index + 1 < section_count, |section| {
                         section.child(Divider::horizontal())
                     })
@@ -66,6 +73,40 @@ impl Render for SettingsPage {
 }
 
 fn row(setting: &'static dyn AnySetting, theme: &Theme, cx: &App) -> AnyElement {
+    labelled_row(
+        setting.label(),
+        setting.description(),
+        control(setting, cx),
+        theme,
+    )
+}
+
+/// Not a setting, but it belongs beside the one that turns the server on: the command holds a
+/// token nobody can type from memory.
+fn mcp_connection_row(theme: &Theme) -> AnyElement {
+    let copy = Button::new("copy-mcp-connection", "Copy command")
+        .size(ButtonSize::Small)
+        .on_click(|_, window, cx| {
+            let command = RunCommand {
+                id: mcp::COPY_CONNECTION,
+                page: None,
+            };
+            window.dispatch_action(Box::new(command), cx)
+        });
+    labelled_row(
+        "Connect Claude Code",
+        "Copies a command to paste into a terminal. It contains this computer's access token.",
+        copy.into_any_element(),
+        theme,
+    )
+}
+
+fn labelled_row(
+    label: &'static str,
+    description: &'static str,
+    control: AnyElement,
+    theme: &Theme,
+) -> AnyElement {
     div()
         .flex()
         .items_center()
@@ -78,16 +119,16 @@ fn row(setting: &'static dyn AnySetting, theme: &Theme, cx: &App) -> AnyElement 
                 .flex_col()
                 .flex_1()
                 .min_w_0()
-                .child(setting.label())
+                .child(label)
                 .child(
                     div()
                         .text_size(theme.text.caption.size)
                         .line_height(theme.text.caption.line_height)
                         .text_color(theme.colors.text_muted)
-                        .child(setting.description()),
+                        .child(description),
                 ),
         )
-        .child(control(setting, cx))
+        .child(control)
         .into_any_element()
 }
 
