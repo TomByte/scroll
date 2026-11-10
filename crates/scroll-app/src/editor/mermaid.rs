@@ -76,6 +76,20 @@ impl DiagramStyle {
         }
     }
 
+    /// Light-page colours, for tests that need a style without a window.
+    #[cfg(test)]
+    pub fn for_tests() -> DiagramStyle {
+        DiagramStyle {
+            background: hsla(0.0, 0.0, 1.0, 1.0),
+            node_fill: hsla(0.57, 0.7, 0.95, 1.0),
+            node_border: hsla(0.57, 0.7, 0.5, 1.0),
+            group_fill: hsla(0.0, 0.0, 0.95, 1.0),
+            line: hsla(0.58, 0.1, 0.4, 1.0),
+            text: hsla(0.58, 0.3, 0.14, 1.0),
+            series: hsla(0.57, 0.55, 0.72, 1.0),
+        }
+    }
+
     fn mermaid_theme(&self) -> mermaid_rs_renderer::Theme {
         let background = hex(self.background);
         let node_fill = hex(self.node_fill);
@@ -220,15 +234,7 @@ mod tests {
     use super::*;
 
     fn style() -> DiagramStyle {
-        DiagramStyle {
-            background: hsla(0.0, 0.0, 1.0, 1.0),
-            node_fill: hsla(0.57, 0.7, 0.95, 1.0),
-            node_border: hsla(0.57, 0.7, 0.5, 1.0),
-            group_fill: hsla(0.0, 0.0, 0.95, 1.0),
-            line: hsla(0.58, 0.1, 0.4, 1.0),
-            text: hsla(0.58, 0.3, 0.14, 1.0),
-            series: hsla(0.57, 0.55, 0.72, 1.0),
-        }
+        DiagramStyle::for_tests()
     }
 
     /// How many pixels of `a` differ from `b`; both are the same size.

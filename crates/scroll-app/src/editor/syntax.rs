@@ -1,6 +1,6 @@
 //! Colours for code blocks. The grammars load in the background the first time a page shows a
 //! code block with a language; until then, and for a language without a grammar, code is
-//! plain.
+//! plain. A page being opened builds the grammars of its first screen before it is shown.
 //!
 //! Highlighting is by line and kept per block. After an edit only the lines from the first
 //! changed one are parsed again, and only until the parser reaches an unchanged line in the
@@ -17,15 +17,17 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use gpui::{App, Hsla, TextRun};
+use gpui::{App, Context, Hsla, Task, TextRun};
 use scroll_ui::theme::SyntaxColors;
 use syntect::parsing::{
     ParseState, ParsingError, Scope, ScopeError, ScopeStack, SyntaxReference, SyntaxSet,
 };
 use syntect::util::LinesWithEndings;
 
+use super::PageEditor;
 use super::code_language::CodeLanguage;
-use crate::editor::document::BlockId;
+use super::diagram_block::FIRST_SCREEN_BLOCKS;
+use crate::editor::document::{BlockId, BlockKind};
 
 /// How long one block may spend highlighting in one frame (a frame at 120 Hz is 8.3 ms).
 const FRAME_BUDGET: Duration = Duration::from_millis(2);
@@ -62,6 +64,59 @@ pub(super) fn start_loading_grammars(cx: &mut App) {
         }
     })
     .detach();
+}
+
+/// Builds the grammars of `languages` in the background, reading the grammars first if need
+/// be. A grammar builds its patterns as it parses its first line (any line), which would hold
+/// up the frame doing it by 2–30 ms, once per language per run; parsing a line with a built
+/// grammar is cheap. Built grammars take 5–15 MB each, so only those a page uses are built.
+fn build_grammars(languages: Vec<CodeLanguage>, cx: &App) -> Task<()> {
+    cx.background_executor().spawn(async move {
+        let grammars = GRAMMARS.get_or_init(SyntaxSet::load_defaults_newlines);
+        for language in languages {
+            let Some(syntax) = language.grammar(grammars) else {
+                continue;
+            };
+            if let Err(error) = LineStart::new(syntax).parse("x = 1\n", grammars) {
+                log::warn!("could not build the {} grammar: {error}", syntax.name);
+            }
+        }
+    })
+}
+
+impl PageEditor {
+    /// Builds the grammars the code blocks on the page's first screen need, in the background,
+    /// so its first frame shows them in colour without being held up.
+    pub(crate) fn build_first_screen_grammars(&mut self, cx: &mut Context<Self>) {
+        let mut languages: Vec<CodeLanguage> = Vec::new();
+        for block in self.blocks.iter().take(FIRST_SCREEN_BLOCKS) {
+            let language = self.code_language(block.info.id);
+            let has_grammar = !matches!(language, CodeLanguage::PlainText | CodeLanguage::Mermaid);
+            if block.info.kind == BlockKind::Code && has_grammar && !languages.contains(&language) {
+                languages.push(language);
+            }
+        }
+        if languages.is_empty() {
+            return;
+        }
+        self.code_highlights.is_building_grammars = true;
+        let building = build_grammars(languages, cx);
+        cx.spawn(async move |editor, cx| {
+            building.await;
+            let built = editor.update(cx, |editor, cx| {
+                editor.code_highlights.is_building_grammars = false;
+                cx.notify();
+            });
+            if let Err(error) = built {
+                log::debug!("page closed before its code grammars were built: {error}");
+            }
+        })
+        .detach();
+    }
+
+    pub(crate) fn are_first_screen_grammars_built(&self) -> bool {
+        !self.code_highlights.is_building_grammars
+    }
 }
 
 /// Loads the grammars on this thread, for tests that need colours at once.
@@ -326,6 +381,8 @@ fn block_spans(lines: &[Line]) -> Rc<[HighlightSpan]> {
 pub(super) struct CodeHighlights {
     // Filled while painting, which only reads the editor.
     blocks: RefCell<HashMap<BlockId, Highlighted>>,
+    /// While the grammars the first screen needs are built (`build_first_screen_grammars`).
+    is_building_grammars: bool,
 }
 
 impl CodeHighlights {

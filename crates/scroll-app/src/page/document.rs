@@ -36,6 +36,7 @@ impl PageView {
             Err(error) => {
                 log::error!("could not open page {:?}: {error}", self.page);
                 self.body = Body::Failed(error.to_string());
+                self.mark_ready(cx);
                 return cx.notify();
             }
         };
@@ -78,6 +79,7 @@ impl PageView {
             Ok(block) => block,
             Err(error) => {
                 self.body = Body::Failed(error.to_string());
+                self.mark_ready(cx);
                 return cx.notify();
             }
         };
@@ -97,13 +99,14 @@ impl PageView {
                 PageEditorEvent::CaretMoved => view.send_presence(cx),
                 PageEditorEvent::CreateDatabase => view.create_database(cx),
             }));
-        let is_untitled = self.title.read(cx).text().trim().is_empty();
-        if is_untitled && access == PageAccess::Edit {
-            window.focus(&self.title.read(cx).focus_handle(cx));
-        } else {
-            editor.update(cx, |editor, cx| editor.focus_start(window, cx));
-        }
+        let theme = Theme::current(window, cx);
+        editor.update(cx, |editor, cx| {
+            editor.draw_first_screen_diagrams(&theme, cx);
+            editor.build_first_screen_grammars(cx);
+        });
+        self.mark_ready_when(&editor, is_first_screen_ready, cx);
         self.body = Body::Document(editor);
+        self.focus_on_open(window, cx);
         log::debug!(
             "timing: page content shown {:?} after launch",
             crate::logger::started().elapsed()
@@ -111,6 +114,13 @@ impl PageView {
         // A page that had no blocks just got its first one; save it.
         self.save_edits(cx);
         cx.notify();
+    }
+
+    /// Whether the page shows a document with its first screen ready, for tests.
+    #[cfg(test)]
+    pub(crate) fn is_first_screen_ready(&self, cx: &gpui::App) -> bool {
+        self.editor()
+            .is_some_and(|editor| is_first_screen_ready(editor.read(cx)))
     }
 
     pub(super) fn editor(&self) -> Option<&Entity<PageEditor>> {
@@ -178,4 +188,10 @@ impl PageView {
         })
         .detach();
     }
+}
+
+/// Whether what the page's first screen shows is ready: its diagrams drawn and its code
+/// grammars built, so they neither pop in nor hold up its first frames.
+fn is_first_screen_ready(editor: &PageEditor) -> bool {
+    editor.are_first_screen_diagrams_drawn() && editor.are_first_screen_grammars_built()
 }

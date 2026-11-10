@@ -63,11 +63,13 @@ impl AppWindow {
             Surface::Window => self.run_window_action(action.as_ref(), window, cx),
             Surface::Workspace => self.run_page_command(action.as_ref(), window, cx),
             Surface::Page => {
+                self.finish_switch(window, cx);
                 if let Some(page) = self.page.clone() {
                     page.update(cx, |page, cx| page.run(action.as_ref(), window, cx));
                 }
             }
             Surface::Database => {
+                self.finish_switch(window, cx);
                 let database = self
                     .page
                     .as_ref()

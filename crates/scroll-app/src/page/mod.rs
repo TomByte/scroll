@@ -1,6 +1,10 @@
 //! One open page: its editable title, then either its block editor or, for a page holding a
 //! database, the database's views. A database row's page also shows its property values.
 //!
+//! The page loads in the background and says when it is ready to be put on screen in one step
+//! (`PageViewEvent::Ready`): its content is in, with the diagrams on its first screen drawn
+//! and the grammars its code needs built. It takes focus only once it is on screen.
+//!
 //! The page's document loads in the background; every local edit is saved as it happens. In
 //! a local workspace the saved edits are folded into a snapshot shortly after typing stops;
 //! in a linked one the sync engine does that when the page closes, and this view imports
@@ -48,6 +52,8 @@ pub enum PageViewEvent {
     OpenPage(PageId),
     /// The page was deleted or never existed (an old link or setting).
     Missing,
+    /// What the page's first screen shows has loaded; sent once.
+    Ready,
 }
 
 /// Someone else on this page, as their presence last said.
@@ -85,6 +91,11 @@ pub struct PageView {
     /// Shown on this person's caret on other devices.
     my_name: Option<String>,
     compaction: Task<()>,
+    is_ready: bool,
+    /// Watches the editor or database until the page is ready.
+    readiness: Option<Subscription>,
+    /// Whether the window shows the page yet; it takes focus only then.
+    is_on_screen: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -199,6 +210,9 @@ impl PageView {
             people: HashMap::new(),
             my_name,
             compaction: Task::ready(()),
+            is_ready: false,
+            readiness: None,
+            is_on_screen: false,
             _subscriptions: subscriptions,
         }
     }
@@ -212,10 +226,73 @@ impl PageView {
         self.page
     }
 
+    #[cfg(test)]
+    pub(crate) fn is_loading(&self) -> bool {
+        matches!(self.body, Body::Loading)
+    }
+
     fn show_missing(&mut self, cx: &mut Context<Self>) {
         self.body = Body::Failed("This page no longer exists.".into());
         cx.emit(PageViewEvent::Missing);
+        self.mark_ready(cx);
         cx.notify();
+    }
+
+    /// Called by the window as it puts the page on screen.
+    pub fn arrive_on_screen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.is_on_screen = true;
+        self.focus_on_open(window, cx);
+    }
+
+    fn mark_ready(&mut self, cx: &mut Context<Self>) {
+        self.readiness = None;
+        if !self.is_ready {
+            self.is_ready = true;
+            cx.emit(PageViewEvent::Ready);
+        }
+    }
+
+    /// Marks the page ready once `is_ready` holds for `part` (its editor or database).
+    fn mark_ready_when<T: 'static>(
+        &mut self,
+        part: &Entity<T>,
+        is_ready: fn(&T) -> bool,
+        cx: &mut Context<Self>,
+    ) {
+        if is_ready(part.read(cx)) {
+            return self.mark_ready(cx);
+        }
+        self.readiness = Some(cx.observe(part, move |view, part, cx| {
+            if is_ready(part.read(cx)) {
+                view.mark_ready(cx);
+            }
+        }));
+    }
+
+    /// Focuses where a newly opened page wants it: an untitled page's title, else its content.
+    /// Waits until the page is on screen, so the page still showing keeps focus until then.
+    fn focus_on_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.is_on_screen {
+            return;
+        }
+        let title = self.title.read(cx);
+        match &self.body {
+            Body::Document(editor) => {
+                if title.text().trim().is_empty() && self.access == PageAccess::Edit {
+                    window.focus(&title.focus_handle(cx));
+                } else {
+                    editor.update(cx, |editor, cx| editor.focus_start(window, cx));
+                }
+            }
+            Body::Database(database) => {
+                if title.text().is_empty() {
+                    window.focus(&title.focus_handle(cx));
+                } else {
+                    database.update(cx, |database, cx| database.focus_table(window, cx));
+                }
+            }
+            Body::Loading | Body::Failed(_) => {}
+        }
     }
 
     /// Sets the page up as a database, a row with properties, or a document, now that its
@@ -243,12 +320,9 @@ impl PageView {
                     DatabaseViewEvent::OpenPage(page) => cx.emit(PageViewEvent::OpenPage(*page)),
                 }),
             );
-        if self.title.read(cx).text().is_empty() {
-            window.focus(&self.title.read(cx).focus_handle(cx));
-        } else {
-            view.update(cx, |view, cx| view.focus_table(window, cx));
-        }
+        self.mark_ready_when(&view, DatabaseView::has_table, cx);
         self.body = Body::Database(view);
+        self.focus_on_open(window, cx);
         log::debug!(
             "timing: database shown {:?} after launch",
             crate::logger::started().elapsed()

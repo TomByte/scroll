@@ -5,6 +5,7 @@ pub mod command_list;
 mod command_routing;
 pub mod commands;
 pub mod history;
+mod page_switch;
 pub mod settings;
 #[cfg(test)]
 mod tests;
@@ -36,11 +37,27 @@ use crate::workspace::page_tree::labelled_title;
 use crate::workspace::settings::WorkspaceSettings;
 use crate::workspace::{Workspace, WorkspaceEvent};
 
+/// How opaque a page's content is as its fade in starts. Starting from nothing would show a
+/// blank page area for the first frames of every switch.
+const PAGE_FADE_START: f32 = 0.6;
+
+/// What the page area showed in one frame, recorded for tests.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug)]
+struct PageAreaFrame {
+    page: Option<PageId>,
+    is_loading: bool,
+    opacity: f32,
+}
+
 pub struct AppWindow {
     window_handle: AnyWindowHandle,
     workspace: Entity<Workspace>,
     sidebar: Entity<Sidebar>,
+    /// The page on screen.
     page: Option<Entity<PageView>>,
+    /// The page being opened, loading off screen until it is ready (`page_switch`).
+    incoming: Option<page_switch::IncomingPage>,
     history: History,
     overlays: Overlays,
     settings: AppSettings,
@@ -51,6 +68,8 @@ pub struct AppWindow {
     /// How often each command was run this session, so frequent ones rank first.
     command_usage: CommandUsage,
     page_subscriptions: Vec<Subscription>,
+    #[cfg(test)]
+    page_area_frames: Vec<PageAreaFrame>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -97,6 +116,7 @@ impl AppWindow {
             workspace,
             sidebar,
             page: None,
+            incoming: None,
             history: History::default(),
             overlays,
             settings,
@@ -106,6 +126,8 @@ impl AppWindow {
             palette_subscription: None,
             command_usage: CommandUsage::new(),
             page_subscriptions: Vec::new(),
+            #[cfg(test)]
+            page_area_frames: Vec::new(),
             _subscriptions: subscriptions,
         };
         app_window.apply_theme(window, cx);
@@ -129,47 +151,6 @@ impl AppWindow {
     pub fn open_page(&mut self, page: PageId, window: &mut Window, cx: &mut Context<Self>) {
         self.history.visit(page);
         self.show_page(page, window, cx);
-    }
-
-    fn show_page(&mut self, page: PageId, window: &mut Window, cx: &mut Context<Self>) {
-        if self
-            .page
-            .as_ref()
-            .is_some_and(|view| view.read(cx).page() == page)
-        {
-            return;
-        }
-        let workspace = self.workspace.clone();
-        let my_name = cx.try_global::<Accounts>().and_then(|accounts| {
-            let link = accounts.registry().current().server.as_ref()?;
-            Some(
-                accounts
-                    .registry()
-                    .account(&link.server_url)?
-                    .display_name
-                    .clone(),
-            )
-        });
-        let view = cx.new(|cx| PageView::new(page, workspace, my_name, window, cx));
-        self.page_subscriptions = vec![
-            cx.subscribe_in(
-                &view,
-                window,
-                |this, _, event: &PageViewEvent, window, cx| match event {
-                    PageViewEvent::OpenPage(page) => this.open_page(*page, window, cx),
-                    PageViewEvent::Missing => this.leave_missing_page(window, cx),
-                },
-            ),
-            // Who else is on the page shows in the toolbar.
-            cx.observe(&view, |_, _, cx| cx.notify()),
-        ];
-        self.page = Some(view);
-        self.sidebar
-            .update(cx, |sidebar, cx| sidebar.set_current_page(Some(page), cx));
-        self.workspace_settings.last_page = Some(page);
-        self.update_window_title(window, cx);
-        self.save_workspace_settings(cx);
-        cx.notify();
     }
 
     pub(crate) fn current_page(&self) -> Option<PageId> {
@@ -247,6 +228,7 @@ impl AppWindow {
         // A workspace that was empty (still downloading, say) opens its first page once it has one.
         let first_page = self.workspace.read(cx).tree().first_live_page();
         if self.page.is_none()
+            && !self.is_switching()
             && let Some(first) = first_page
         {
             self.open_page(first, window, cx);
@@ -255,12 +237,14 @@ impl AppWindow {
         cx.notify();
     }
 
-    /// The open page is gone (an old setting or link): forget it and show the first page.
-    fn leave_missing_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(missing) = self.current_page() {
-            self.history.forget(missing);
+    /// A page that was opened is gone (an old setting or link): forget it, and if it is the
+    /// current page show the one before it, else the first page.
+    fn leave_missing_page(&mut self, missing: PageId, window: &mut Window, cx: &mut Context<Self>) {
+        let was_current = self.current_page() == Some(missing);
+        self.history.forget(missing);
+        if was_current {
+            self.show_next_page(window, cx);
         }
-        self.show_next_page(window, cx);
     }
 
     /// After the open page went away: the page before it in the history, else the first page.
@@ -276,6 +260,7 @@ impl AppWindow {
             }
             None => {
                 self.page = None;
+                self.incoming = None;
                 cx.notify();
             }
         }
@@ -317,6 +302,7 @@ impl AppWindow {
                 .sidebar
                 .update(cx, |sidebar, cx| sidebar.start_renaming(page, window, cx)),
             None => {
+                self.finish_switch(window, cx);
                 if let Some(view) = self.page.as_ref() {
                     view.update(cx, |view, cx| view.focus_title(window, cx));
                 }
@@ -326,8 +312,7 @@ impl AppWindow {
 
     /// Whether the open page shows a table, for commands that act on one.
     pub(super) fn has_table(&self, cx: &gpui::App) -> bool {
-        self.page
-            .as_ref()
+        self.current_view()
             .and_then(|page| page.read(cx).database_view())
             .is_some_and(|database| database.read(cx).has_table())
     }
@@ -397,9 +382,21 @@ impl Render for AppWindow {
             window,
             cx,
         );
+        let page_opacity = PAGE_FADE_START + (1.0 - PAGE_FADE_START) * page_shown;
+        #[cfg(test)]
+        self.page_area_frames.push(PageAreaFrame {
+            page: self.page.as_ref().map(|page| page.read(cx).page()),
+            is_loading: self
+                .page
+                .as_ref()
+                .is_some_and(|page| page.read(cx).is_loading()),
+            opacity: page_opacity,
+        });
         let toolbar = self.render_toolbar(&theme, sidebar_width, cx);
         let content = match self.page.as_ref() {
             Some(page) => page.clone().into_any_element(),
+            // The first page is still loading.
+            None if self.is_switching() => div().into_any_element(),
             None => {
                 let no_pages = format!(
                     "No pages. Press {} to create one.",
@@ -444,7 +441,7 @@ impl Render for AppWindow {
                         div()
                             .flex_1()
                             .min_h_0()
-                            .when(page_shown < 1.0, |page| page.opacity(page_shown))
+                            .when(page_shown < 1.0, |page| page.opacity(page_opacity))
                             .child(content),
                     ),
             )

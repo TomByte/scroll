@@ -473,3 +473,279 @@ fn escape_while_recording_gives_up_without_closing_the_settings(cx: &mut TestApp
     cx.run_until_parked();
     assert!(!is_settings_open(cx));
 }
+
+mod page_switching {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use gpui::{Entity, TestAppContext, VisualTestContext};
+    use scroll_core::id::PageId;
+    use scroll_sync::{ConnectionStatus, SyncEvent};
+
+    use super::open_app;
+    use crate::editor::document::{BlockKind, PageDocument, Placement};
+    use crate::window::page_switch::PAGE_WAIT;
+    use crate::window::{AppWindow, PAGE_FADE_START};
+    use crate::workspace::Workspace;
+    use crate::workspace::storage;
+
+    fn on_screen(app: &Entity<AppWindow>, cx: &mut VisualTestContext) -> Option<PageId> {
+        app.read_with(cx, |app, cx| app.page_on_screen(cx))
+    }
+
+    fn current(app: &Entity<AppWindow>, cx: &mut VisualTestContext) -> Option<PageId> {
+        app.read_with(cx, |app, _| app.current_page())
+    }
+
+    fn page_titled(
+        title: &str,
+        workspace: &Entity<Workspace>,
+        cx: &mut VisualTestContext,
+    ) -> PageId {
+        workspace.read_with(cx, |workspace, _| {
+            let tree = workspace.tree();
+            let mut pending: Vec<PageId> = tree.children(None).iter().map(|page| page.id).collect();
+            while let Some(page) = pending.pop() {
+                if tree.page(page).is_some_and(|stored| stored.title == title) {
+                    return page;
+                }
+                pending.extend(tree.children(Some(page)).iter().map(|child| child.id));
+            }
+            panic!("no page titled {title}")
+        })
+    }
+
+    /// The page on screen now and every page put on screen from now on, in order.
+    fn record_pages_on_screen(
+        app: &Entity<AppWindow>,
+        cx: &mut VisualTestContext,
+    ) -> (Rc<RefCell<Vec<PageId>>>, gpui::Subscription) {
+        let shown = Rc::new(RefCell::new(
+            on_screen(app, cx).into_iter().collect::<Vec<_>>(),
+        ));
+        let recorded = shown.clone();
+        let subscription = cx.update(|_, cx| {
+            cx.observe(app, move |app, cx| {
+                let page = app.read(cx).page_on_screen(cx);
+                let mut recorded = recorded.borrow_mut();
+                if page.is_some() && recorded.last().copied() != page {
+                    recorded.extend(page);
+                }
+            })
+        });
+        (shown, subscription)
+    }
+
+    /// A new page under `parent` whose content has not arrived: in a workspace that is online
+    /// it waits for it from the server, so it is not ready until that comes or times out.
+    async fn page_still_loading(
+        parent: PageId,
+        workspace: &Entity<Workspace>,
+        cx: &mut VisualTestContext,
+    ) -> PageId {
+        workspace.update(cx, |workspace, cx| {
+            workspace.handle_sync_event(SyncEvent::Status(ConnectionStatus::Online), cx)
+        });
+        workspace
+            .update(cx, |workspace, cx| workspace.create_page(Some(parent), cx))
+            .await
+            .expect("the page is created")
+    }
+
+    #[gpui::test]
+    fn the_page_on_screen_stays_until_the_next_one_is_ready(cx: &mut TestAppContext) {
+        let (app, workspace, cx) = open_app(cx);
+        cx.run_until_parked();
+        let first = on_screen(&app, cx).expect("the first page is on screen");
+        let roadmap = page_titled("Roadmap", &workspace, cx);
+
+        app.update_in(cx, |app, window, cx| app.open_page(roadmap, window, cx));
+        assert_eq!(
+            current(&app, cx),
+            Some(roadmap),
+            "it is current from the click"
+        );
+        assert_eq!(on_screen(&app, cx), Some(first), "the page before stays up");
+
+        cx.run_until_parked();
+        assert_eq!(on_screen(&app, cx), Some(roadmap), "on screen once ready");
+    }
+
+    #[gpui::test]
+    async fn a_page_still_loading_goes_on_screen_after_the_wait(cx: &mut TestAppContext) {
+        let (app, workspace, cx) = open_app(cx);
+        cx.run_until_parked();
+        let first = on_screen(&app, cx).unwrap();
+        let slow = page_still_loading(first, &workspace, cx).await;
+
+        app.update_in(cx, |app, window, cx| app.open_page(slow, window, cx));
+        cx.run_until_parked();
+        assert_eq!(on_screen(&app, cx), Some(first));
+        assert!(
+            cx.debug_bounds("crumb-1").is_some(),
+            "the breadcrumbs already show the page being opened"
+        );
+
+        cx.executor().advance_clock(PAGE_WAIT);
+        cx.run_until_parked();
+        assert_eq!(on_screen(&app, cx), Some(slow), "shown, still loading");
+    }
+
+    #[gpui::test]
+    async fn going_back_before_the_next_page_is_ready_stays_on_the_page(cx: &mut TestAppContext) {
+        let (app, workspace, cx) = open_app(cx);
+        cx.run_until_parked();
+        let first = on_screen(&app, cx).unwrap();
+        let slow = page_still_loading(first, &workspace, cx).await;
+        let (shown, _subscription) = record_pages_on_screen(&app, cx);
+
+        app.update_in(cx, |app, window, cx| app.open_page(slow, window, cx));
+        cx.run_until_parked();
+        cx.simulate_keystrokes("cmd-[");
+        cx.executor().advance_clock(PAGE_WAIT * 2);
+        cx.run_until_parked();
+
+        assert_eq!(current(&app, cx), Some(first));
+        assert_eq!(*shown.borrow(), [first], "the abandoned page never showed");
+        cx.simulate_keystrokes("cmd-]");
+        assert_eq!(current(&app, cx), Some(slow), "and can be gone forward to");
+    }
+
+    /// The user's report: "it's like it's showing a blank page quickly for a second before
+    /// showing the populated page". Every frame drawn during a switch shows a page with its
+    /// content, never an empty or still-loading page area, and a fade never starts from nothing.
+    #[gpui::test]
+    fn no_frame_shows_an_empty_page_area_during_a_switch(cx: &mut TestAppContext) {
+        let (app, workspace, cx) = open_app(cx);
+        cx.run_until_parked();
+        let first = on_screen(&app, cx).unwrap();
+        let roadmap = page_titled("Roadmap", &workspace, cx);
+        app.update(cx, |app, _| app.page_area_frames.clear());
+
+        app.update_in(cx, |app, window, cx| app.open_page(roadmap, window, cx));
+        cx.run_until_parked();
+        cx.simulate_keystrokes("cmd-[");
+        cx.run_until_parked();
+
+        let frames = app.read_with(cx, |app, _| app.page_area_frames.clone());
+        assert!(frames.len() >= 2, "frames were drawn: {frames:?}");
+        for frame in &frames {
+            assert!(frame.page.is_some() && !frame.is_loading, "{frame:?}");
+            assert!(frame.opacity >= PAGE_FADE_START, "{frame:?}");
+        }
+        let pages: Vec<PageId> = frames.iter().filter_map(|frame| frame.page).collect();
+        assert!(pages.contains(&roadmap), "the new page was drawn");
+        assert_eq!(
+            pages.last(),
+            Some(&first),
+            "and the old one again after going back"
+        );
+    }
+
+    #[gpui::test]
+    fn rapid_switching_ends_on_the_last_page_and_lets_the_others_go(cx: &mut TestAppContext) {
+        let (app, workspace, cx) = open_app(cx);
+        cx.run_until_parked();
+        let first = on_screen(&app, cx).unwrap();
+        let (shown, _subscription) = record_pages_on_screen(&app, cx);
+        let [projects, roadmap, reading] =
+            ["Projects", "Roadmap", "Reading list"].map(|title| page_titled(title, &workspace, cx));
+
+        let mut abandoned = Vec::new();
+        for page in [projects, roadmap, reading] {
+            app.update_in(cx, |app, window, cx| {
+                app.open_page(page, window, cx);
+                abandoned.extend(app.current_view().map(Entity::downgrade));
+            });
+        }
+        cx.run_until_parked();
+
+        assert_eq!(on_screen(&app, cx), Some(reading));
+        assert_eq!(
+            *shown.borrow(),
+            [first, reading],
+            "no page in between was shown"
+        );
+        assert!(
+            abandoned[..2].iter().all(|view| view.upgrade().is_none()),
+            "the pages abandoned on the way were let go"
+        );
+        cx.simulate_keystrokes("cmd-[");
+        cx.run_until_parked();
+        assert_eq!(
+            on_screen(&app, cx),
+            Some(roadmap),
+            "the history kept every visit"
+        );
+    }
+
+    #[gpui::test]
+    fn opening_a_page_that_no_longer_exists_stays_on_the_page(cx: &mut TestAppContext) {
+        let (app, _workspace, cx) = open_app(cx);
+        cx.run_until_parked();
+        let first = on_screen(&app, cx).unwrap();
+
+        app.update_in(cx, |app, window, cx| {
+            app.open_page(PageId::generate(), window, cx)
+        });
+        cx.run_until_parked();
+
+        assert_eq!(current(&app, cx), Some(first));
+        assert_eq!(on_screen(&app, cx), Some(first));
+        assert!(
+            !app.read_with(cx, |app, _| app.history.can_go_back()),
+            "it was forgotten"
+        );
+    }
+
+    #[gpui::test]
+    async fn a_page_with_a_diagram_goes_on_screen_with_it_drawn(cx: &mut TestAppContext) {
+        let (app, workspace, cx) = open_app(cx);
+        cx.run_until_parked();
+        let page = workspace
+            .update(cx, |workspace, cx| workspace.create_page(None, cx))
+            .await
+            .unwrap();
+        let mut content = PageDocument::empty();
+        let block = content
+            .insert_block(Placement::LastChildOf(None), BlockKind::Code)
+            .unwrap();
+        content
+            .insert_text(block, 0, "flowchart LR\n    A --> B")
+            .unwrap();
+        content.set_block_language(block, Some("mermaid")).unwrap();
+        content.commit();
+        let updates = content.take_outgoing_updates();
+        workspace.read_with(cx, |workspace, _| {
+            workspace.write("write a diagram page", move |store| {
+                storage::record_updates(store, page, &updates)
+            })
+        });
+        let ready_when_shown = Rc::new(RefCell::new(Vec::new()));
+        let recorded = ready_when_shown.clone();
+        let _subscription = cx.update(|_, cx| {
+            cx.observe(&app, move |app, cx| {
+                let app = app.read(cx);
+                if let Some(view) = app
+                    .page
+                    .as_ref()
+                    .filter(|_| app.page_on_screen(cx) == Some(page))
+                {
+                    recorded
+                        .borrow_mut()
+                        .push(view.read(cx).is_first_screen_ready(cx));
+                }
+            })
+        });
+
+        app.update_in(cx, |app, window, cx| app.open_page(page, window, cx));
+        cx.run_until_parked();
+
+        assert_eq!(on_screen(&app, cx), Some(page));
+        assert_eq!(
+            ready_when_shown.borrow().first(),
+            Some(&true),
+            "drawn from the first frame"
+        );
+    }
+}
