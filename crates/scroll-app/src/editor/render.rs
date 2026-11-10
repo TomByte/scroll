@@ -142,7 +142,14 @@ impl PageEditor {
         let theme = Theme::current(window, cx);
         let header_rows = self.header_rows();
         let row = if index < header_rows {
-            self.header.clone().map(|header| header.into_any_element())
+            // A press in the header is the header's own (the title takes focus from it): it must not
+            // reach the editor, which would take focus back and put the caret in the last block.
+            self.header.clone().map(|header| {
+                div()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(header)
+                    .into_any_element()
+            })
         } else {
             Some(self.render_block(index - header_rows, &theme, window, cx))
         };

@@ -315,3 +315,19 @@ async fn clicking_a_breadcrumb_opens_that_ancestor(cx: &mut TestAppContext) {
 
     assert_eq!(app.read_with(cx, |app, _| app.current_page()), Some(parent));
 }
+
+#[gpui::test]
+fn a_click_on_the_title_edits_it_again_after_typing_in_the_page(cx: &mut TestAppContext) {
+    let (app, workspace, cx) = open_app(cx);
+    cx.simulate_keystrokes("cmd-n");
+    cx.simulate_keystrokes("enter");
+    cx.simulate_input("body");
+    cx.run_until_parked();
+    assert_eq!(current_title(&app, &workspace, cx), "");
+
+    let title = cx.debug_bounds("page-title").expect("the title is drawn");
+    cx.simulate_click(title.center(), gpui::Modifiers::none());
+    cx.simulate_input("Plans");
+
+    assert_eq!(current_title(&app, &workspace, cx), "Plans");
+}

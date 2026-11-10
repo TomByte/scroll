@@ -106,7 +106,11 @@ impl Render for PageHeader {
             .pt(PAGE_MARGIN)
             .pb(theme.spacing.lg)
             .child(self.icon.clone())
-            .child(self.title.clone())
+            .child(
+                div()
+                    .debug_selector(|| "page-title".into())
+                    .child(self.title.clone()),
+            )
             .child(self.tags.clone())
             .children(
                 self.properties
