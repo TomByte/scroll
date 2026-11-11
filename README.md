@@ -7,6 +7,10 @@
 
 # Scroll
 
+[![CI](https://github.com/TomByte/scroll/actions/workflows/ci.yml/badge.svg)](https://github.com/TomByte/scroll/actions/workflows/ci.yml)
+[![Security audit](https://github.com/TomByte/scroll/actions/workflows/security.yml/badge.svg)](https://github.com/TomByte/scroll/actions/workflows/security.yml)
+[![Latest release](https://img.shields.io/github/v/release/TomByte/scroll?include_prereleases&label=download)](https://github.com/TomByte/scroll/releases)
+
 A fast, local-first document and database app for macOS, written in Rust with [GPUI](https://www.gpui.rs).
 
 <p align="center">
