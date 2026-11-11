@@ -350,6 +350,9 @@ impl TestApp {
 }
 
 /// Pumps every app's events until `done` holds for them.
+///
+/// The engine writes to the store before it reports the change, so a condition on the store alone can hold
+/// while the event saying so is still on its way: a test that asserts on `log` or `statuses` waits for them.
 pub async fn wait_until(apps: &mut [&mut TestApp], mut done: impl FnMut(&[&mut TestApp]) -> bool) {
     let deadline = tokio::time::Instant::now() + WAIT_LIMIT;
     loop {

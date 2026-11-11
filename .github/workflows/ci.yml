@@ -31,9 +31,10 @@ jobs:
       - name: Tests
         run: cargo test -p scroll-core -p scroll-api -p scroll-ui -p scroll-table -p scroll-settings -p scroll-mcp -p scroll-app
 
-  # The server's tests start real servers against Postgres, which GitHub provides on Linux.
+  # The server's tests, and the sync engine's, start real servers against Postgres, which GitHub
+  # provides on Linux.
   server:
-    name: Server (Linux, Postgres)
+    name: Server and sync (Linux, Postgres)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -55,4 +56,4 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - name: Tests
-        run: cargo test -p scroll-server
+        run: cargo test -p scroll-server -p scroll-sync

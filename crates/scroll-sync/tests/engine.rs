@@ -56,19 +56,21 @@ async fn two_clients_converge_on_records_and_concurrently_edited_pages() {
     editor.start(&team.editor.session_token);
 
     let page = owner.create_page("Plan");
+    // Depending on timing the page arrives as a remote transaction or in the first snapshot.
+    let is_told_of_page = |app: &TestApp| {
+        app.log.iter().any(|event| match event {
+            SyncEvent::RecordsChanged(changes) => {
+                changes.records.contains(&RecordId::Page(page.id))
+                    && changes.child_lists.contains(&None)
+            }
+            SyncEvent::AllRecordsChanged => true,
+            _ => false,
+        })
+    };
     wait_until(&mut [&mut editor], |apps| {
-        title_of(apps[0], page.id).is_some()
+        title_of(apps[0], page.id).is_some() && is_told_of_page(apps[0])
     })
     .await;
-    // Depending on timing the page arrives as a remote transaction or in the first snapshot.
-    assert!(editor.log.iter().any(|event| match event {
-        SyncEvent::RecordsChanged(changes) => {
-            changes.records.contains(&RecordId::Page(page.id))
-                && changes.child_lists.contains(&None)
-        }
-        SyncEvent::AllRecordsChanged => true,
-        _ => false,
-    }));
     editor.commit(vec![set_title(page.id, "Plan B")]);
     wait_until(&mut [&mut owner], |apps| {
         title_of(apps[0], page.id).as_deref() == Some("Plan B")
@@ -173,15 +175,20 @@ async fn a_rejected_transaction_is_undone_locally_and_reported() {
     wait_until(&mut [&mut owner], |apps| apps[0].is_settled()).await;
     editor.start(&team.editor.session_token);
 
-    wait_until(&mut [&mut editor], |apps| apps[0].is_settled()).await;
-    let rejection = editor.log.iter().find_map(|event| match event {
-        SyncEvent::TransactionRejected {
-            reason, records, ..
-        } => Some((reason.clone(), records.clone())),
-        _ => None,
-    });
+    let rejection = |app: &TestApp| {
+        app.log.iter().find_map(|event| match event {
+            SyncEvent::TransactionRejected {
+                reason, records, ..
+            } => Some((reason.clone(), records.clone())),
+            _ => None,
+        })
+    };
+    wait_until(&mut [&mut editor], |apps| {
+        apps[0].is_settled() && rejection(apps[0]).is_some()
+    })
+    .await;
     assert_eq!(
-        rejection,
+        rejection(&editor),
         Some((
             TransactionRejection::Invalid(ValidationError::PageNotFound(doomed.id)),
             vec![RecordId::Page(doomed.id)]
@@ -493,7 +500,11 @@ async fn cutting_the_connection_mid_upload_loses_and_duplicates_nothing() {
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         proxy.cut_connections();
     }
-    wait_until(&mut [&mut owner], |apps| apps[0].is_settled()).await;
+    // The last cut can come after everything was acknowledged; the engine reconnects all the same.
+    wait_until(&mut [&mut owner], |apps| {
+        apps[0].is_settled() && online_count(apps[0]) > CUTS
+    })
+    .await;
 
     let workspace_id = team.owner_membership.workspace_id.0;
     let database = server.pool.get().await.unwrap();
@@ -515,10 +526,6 @@ async fn cutting_the_connection_mid_upload_loses_and_duplicates_nothing() {
         .get(0);
     assert_eq!(committed as usize, PAGES + 1);
     assert_eq!(stored_updates as usize, PARAGRAPHS);
-    assert!(
-        online_count(&owner) > CUTS,
-        "the engine reconnected after every cut"
-    );
     assert!(
         !owner
             .log
@@ -723,8 +730,11 @@ async fn a_first_join_stopped_while_applying_its_snapshot_resumes_without_downlo
     wait_until(&mut [&mut owner], |apps| apps[0].is_settled()).await;
 
     desktop.start(&team.editor.session_token);
+    // Reported after the resumed finish's progress, so every `ApplyProgress` is in the log by then.
     wait_until(&mut [&mut desktop], |apps| {
-        title_of(apps[0], later.id).is_some()
+        apps[0].log.iter().any(|event| {
+            matches!(event, SyncEvent::RecordsChanged(changes) if changes.records.contains(&RecordId::Page(later.id)))
+        })
     })
     .await;
     assert_eq!(desktop.store.unfinished_snapshot().unwrap(), None);
