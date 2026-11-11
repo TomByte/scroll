@@ -4,7 +4,7 @@
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::id::{PageId, TagId};
-use crate::store::{StoreError, WorkspaceStore};
+use crate::store::{StoreError, WorkspaceStore, sql_limit};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchHit {
@@ -34,13 +34,16 @@ impl WorkspaceStore {
         };
         let mut statement = self.conn.prepare_cached(sql)?;
         let hits = statement
-            .query_map(params![expression, limit, SNIPPET_WORDS], |row| {
-                Ok(SearchHit {
-                    page_id: row.get(0)?,
-                    title: row.get(1)?,
-                    snippet: row.get(2)?,
-                })
-            })?
+            .query_map(
+                params![expression, sql_limit(limit), SNIPPET_WORDS],
+                |row| {
+                    Ok(SearchHit {
+                        page_id: row.get(0)?,
+                        title: row.get(1)?,
+                        snippet: row.get(2)?,
+                    })
+                },
+            )?
             .collect::<Result<_, _>>()?;
         Ok(hits)
     }
@@ -209,6 +212,16 @@ mod tests {
             .into_iter()
             .map(|hit| hit.page_id)
             .collect()
+    }
+
+    #[test]
+    fn a_limit_larger_than_sqlite_can_bind_returns_every_match() {
+        let mut store = open_in_memory();
+        let page = create_page(&mut store, "Quarterly planning");
+
+        let hits = store.search("plan", usize::MAX).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].page_id, page);
     }
 
     #[test]

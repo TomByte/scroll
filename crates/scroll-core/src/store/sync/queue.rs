@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::id::PageId;
 use crate::operation::{RecordId, Transaction};
-use crate::store::{StoreError, WorkspaceStore, decode, encode};
+use crate::store::{StoreError, WorkspaceStore, decode, encode, sql_limit};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum QueuedChange {
@@ -61,7 +61,7 @@ impl WorkspaceStore {
             "SELECT queue_order, change FROM tx_queue WHERE queue_order > ?1
              ORDER BY queue_order LIMIT ?2",
         )?;
-        let rows = statement.query_map(params![position, limit], |row| {
+        let rows = statement.query_map(params![position, sql_limit(limit)], |row| {
             Ok((row.get::<_, u64>(0)?, row.get::<_, Vec<u8>>(1)?))
         })?;
         rows.map(|row| {

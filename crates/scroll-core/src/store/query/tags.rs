@@ -6,7 +6,7 @@ use crate::id::{PageId, TagId};
 use crate::record::{Page, Tag};
 use crate::store::kinds::page::{PAGE_COLUMNS, page_from_row};
 use crate::store::kinds::tag::encoded_tag;
-use crate::store::{StoreError, WorkspaceStore};
+use crate::store::{StoreError, WorkspaceStore, sql_limit};
 
 /// A tag and how many pages that are not archived carry it. A page whose delete is waiting for
 /// the server is not counted.
@@ -86,7 +86,7 @@ impl WorkspaceStore {
         );
         let mut parameters: Vec<&dyn rusqlite::ToSql> =
             tags.iter().map(|tag| tag as &dyn rusqlite::ToSql).collect();
-        let limit = limit as i64;
+        let limit = sql_limit(limit);
         parameters.push(&limit);
         let pages = self
             .conn

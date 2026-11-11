@@ -71,6 +71,12 @@ fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T, StoreError> {
     Ok(postcard::from_bytes(bytes)?)
 }
 
+/// A caller's row limit as SQLite can bind it. SQLite integers stop at `i64::MAX`, and no table
+/// holds more rows than that, so a larger limit means the same as no limit.
+fn sql_limit(limit: usize) -> i64 {
+    i64::try_from(limit).unwrap_or(i64::MAX)
+}
+
 #[cfg(test)]
 fn open_in_memory() -> WorkspaceStore {
     WorkspaceStore::open(std::path::Path::new(":memory:")).expect("an in-memory store always opens")

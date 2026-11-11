@@ -671,6 +671,17 @@ fn the_queue_reads_in_bounded_steps_and_counts_cheaply() {
 }
 
 #[test]
+fn a_limit_larger_than_sqlite_can_bind_reads_the_whole_queue() {
+    let (mut store, page) = linked_store_with_page();
+    store
+        .apply_local_transaction(&Transaction::new(vec![set_title(page, "a")]))
+        .unwrap();
+    store.record_local_page_update(page, b"loro bytes").unwrap();
+
+    assert_eq!(store.queued_changes_after(0, usize::MAX).unwrap().len(), 2);
+}
+
+#[test]
 fn acknowledgements_can_be_applied_together() {
     let (mut server, mut client) = (Server::new(), open_linked_in_memory());
     let page = shared_page(&mut server, &mut client);

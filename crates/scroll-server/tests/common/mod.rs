@@ -21,8 +21,9 @@ use scroll_server::{AttemptLimits, Limit, Server, Settings, test_support};
 use serde_json::{Value, json};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::error::ProtocolError;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+use tokio_tungstenite::tungstenite::{Error as SocketError, Message};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use uuid::Uuid;
 
@@ -270,6 +271,18 @@ impl SyncClient {
         }
     }
 
+    /// The next message other than presence. Presence is relayed whenever another connection on an open page moves
+    /// its cursor or leaves it, including when the server drops one for falling behind, so it can come before any
+    /// reply.
+    pub async fn receive_skipping_presence(&mut self) -> ServerMessage {
+        loop {
+            match self.receive().await {
+                ServerMessage::Presence { .. } | ServerMessage::PresenceLeft { .. } => {}
+                message => return message,
+            }
+        }
+    }
+
     /// Waits for the server to close the connection and returns its close frame.
     pub async fn receive_close(&mut self) -> Option<CloseFrame> {
         loop {
@@ -286,7 +299,7 @@ impl SyncClient {
         }
     }
 
-    /// Reads past any messages until the server closes the connection.
+    /// Reads past any messages until the server closes the connection; `None` if it ended without a close frame.
     pub async fn skip_to_close(&mut self) -> Option<CloseFrame> {
         loop {
             let frame = tokio::time::timeout(RECEIVE_TIMEOUT, self.socket.next())
@@ -295,6 +308,9 @@ impl SyncClient {
             match frame {
                 Some(Ok(Message::Close(close_frame))) => return close_frame,
                 Some(Ok(_)) => {}
+                Some(Err(SocketError::Protocol(ProtocolError::ResetWithoutClosingHandshake))) => {
+                    return None;
+                }
                 Some(Err(error)) => panic!("connection failed instead of closing: {error}"),
                 None => return None,
             }
@@ -324,7 +340,7 @@ impl SyncClient {
             last_seen_seq,
         })
         .await;
-        match self.receive().await {
+        match self.receive_skipping_presence().await {
             ServerMessage::PageCatchUp {
                 page_id: caught_up,
                 catch_up,
@@ -350,7 +366,7 @@ impl SyncClient {
     }
 
     pub async fn receive_ack(&mut self, update_id: Uuid) -> u64 {
-        match self.receive().await {
+        match self.receive_skipping_presence().await {
             ServerMessage::PageUpdateAck {
                 update_id: acked,
                 seq,
@@ -384,7 +400,7 @@ impl SyncClient {
         };
         let mut expected_index = 0;
         loop {
-            let (index, is_last, part) = match self.receive().await {
+            let (index, is_last, part) = match self.receive_skipping_presence().await {
                 ServerMessage::WorkspaceCatchUpPart {
                     workspace_id: caught_up,
                     index,
@@ -433,7 +449,7 @@ impl SyncClient {
     /// Pushes and waits for the ack, returning the assigned workspace sequence number.
     pub async fn commit(&mut self, workspace_id: WorkspaceId, transaction: &Transaction) -> u64 {
         self.send_transaction(workspace_id, transaction).await;
-        match self.receive().await {
+        match self.receive_skipping_presence().await {
             ServerMessage::TransactionAck {
                 transaction_id,
                 seq,
@@ -450,7 +466,7 @@ impl SyncClient {
         transaction: &Transaction,
     ) -> TransactionRejection {
         self.send_transaction(workspace_id, transaction).await;
-        match self.receive().await {
+        match self.receive_skipping_presence().await {
             ServerMessage::TransactionRejected {
                 transaction_id,
                 reason,

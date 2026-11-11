@@ -7,7 +7,7 @@ use crate::record::Page;
 use crate::store::kinds::page::{PAGE_COLUMNS, in_tree, page_from_row, read_page};
 
 const IN_TREE: &str = in_tree!();
-use crate::store::{StoreError, WorkspaceStore};
+use crate::store::{StoreError, WorkspaceStore, sql_limit};
 
 /// A page in the tree and how many children it shows, so the sidebar can draw a disclosure
 /// arrow without loading them.
@@ -65,7 +65,7 @@ impl WorkspaceStore {
             .conn
             .prepare_cached(&sql)?
             .query_map(
-                params![parent, position, id, limit as i64],
+                params![parent, position, id, sql_limit(limit)],
                 child_page_from_row,
             )?
             .collect::<Result<_, _>>()?;
