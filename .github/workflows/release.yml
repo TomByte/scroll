@@ -1,0 +1,49 @@
+# Builds the Mac app when a release is published and attaches Scroll.dmg to it.
+# Can also be run by hand for an existing release's tag.
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag of the release to build and attach the app to (e.g. v0.1.0)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-15
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Install Rust targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build Scroll.dmg
+        run: scripts/bundle-macos.sh "${TAG#v}" aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Check the app
+        run: |
+          lipo -archs dist/Scroll.app/Contents/MacOS/Scroll
+          codesign --verify --deep --strict dist/Scroll.app
+          hdiutil verify dist/Scroll.dmg
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mv dist/Scroll.dmg "dist/Scroll-${TAG#v}.dmg"
+          gh release upload "$TAG" "dist/Scroll-${TAG#v}.dmg" --clobber
