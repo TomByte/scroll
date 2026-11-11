@@ -15,7 +15,7 @@ A fast, local-first document and database app for macOS, written in Rust with [G
 
 Scroll is a Notion-like workspace: pages made of blocks, databases with table views, and tags. It works on its own with a local file and no account. Connect it to a Scroll server and the same workspace becomes a team workspace with live co-editing.
 
-> **Status:** early development. The app, the server and live sync work, but nothing has been released yet and there are no pre-built downloads.
+> **Status:** early development. The app, the server and live sync work; expect rough edges.
 
 ## Features
 
@@ -28,7 +28,13 @@ Scroll is a Notion-like workspace: pages made of blocks, databases with table vi
 - **Yours to set up**: nineteen themes, including Catppuccin, Ayu, Kanagawa and Tokyo Night, and every shortcut can be changed.
 - **Search and command palette**: full-text search over titles, text and tags, and every command reachable from the keyboard.
 
-## Getting started
+## Download
+
+Get the latest `Scroll-x.y.z.dmg` from the [releases page](https://github.com/TomByte/scroll/releases), open it and drag Scroll to Applications. It runs on Apple silicon and Intel Macs.
+
+The app is not yet signed with an Apple Developer ID, so macOS blocks its first launch. Open **System Settings → Privacy & Security**, find the message about Scroll and choose **Open Anyway**.
+
+## Building from source
 
 You need macOS and a recent [Rust toolchain](https://rustup.rs) (edition 2024).
 
