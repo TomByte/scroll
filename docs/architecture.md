@@ -103,7 +103,7 @@ One Cargo workspace, nine crates. Dependencies point one way. `scroll-core` is u
 - `scroll-server` — the axum server, by feature: `auth/`, `workspaces/`, `http/`, `pages/`, `records/`, `realtime/`; every setting is read in `config.rs`.
 - `scroll-app` — the app, by feature: `app/`, `window/`, `overlays/`, `accounts/`, `workspace/`, `sidebar/`, `page/`, `database/`, `editor/`, `commands/`, `palette/`, `settings/` (the settings page), `mcp/` (starting and stopping the MCP server), plus a few single-purpose files at the root (sync status wording, title-bar and page layout sizes, JSON file load and save, logging). Each feature declares its own commands; one registry feeds the palette, the menu bar, page menus and key bindings.
 
-Tools: `scroll-core` examples `fixture` and `scale`; `scroll-table` example `table`; `scroll-app` examples `scale_probe` and `editor_perf`; `scroll-server` examples `load_test` and `scale_test`; `scroll-mcp` example `serve`; `scroll-sync` example `engine_scale`.
+Tools: `scroll-core` examples `fixture` and `scale`; `scroll-table` example `table`; `scroll-app` examples `scale_probe`, `editor_perf` and `demo` (the README's GIF, recorded by `scripts/record-demo.sh`); `scroll-server` examples `load_test` and `scale_test`; `scroll-mcp` example `serve`; `scroll-sync` example `engine_scale`.
 
 ## Performance targets
 

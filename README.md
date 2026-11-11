@@ -9,18 +9,23 @@
 
 A fast, local-first document and database app for macOS, written in Rust with [GPUI](https://www.gpui.rs).
 
+<p align="center">
+  <img src="assets/demo/scroll-demo.gif" alt="Scroll in use: a team home page with to-dos and a callout, the command palette opening a page with a Mermaid diagram and highlighted Rust, a roadmap database whose status cell is changed from the keyboard, and the settings page switching between themes" width="880">
+</p>
+
 Scroll is a Notion-like workspace: pages made of blocks, databases with table views, and tags. It works on its own with a local file and no account. Connect it to a Scroll server and the same workspace becomes a team workspace with live co-editing.
 
 > **Status:** early development. The app, the server and live sync work, but nothing has been released yet and there are no pre-built downloads.
 
 ## Features
 
-- **Block editor**: headings, lists, to-dos, quotes, callouts and syntax-highlighted code, with rich text, Markdown shortcuts and slash commands.
+- **Block editor**: headings, lists, to-dos, quotes, callouts, syntax-highlighted code and Mermaid diagrams, with rich text, Markdown shortcuts and slash commands.
 - **Databases**: table views with typed properties, filters and sorts, built to stay smooth at hundreds of thousands of rows.
 - **Local-first**: every workspace is one SQLite file on your machine. Edits apply instantly and work offline.
 - **Live collaboration**: page content is a CRDT ([Loro](https://loro.dev)), so two people can type in the same block and see each other's cursors.
 - **Self-hostable**: the server is a single binary backed by Postgres, with a Dockerfile and Compose file included.
 - **Works with AI tools**: an optional built-in [MCP](https://modelcontextprotocol.io) server lets assistants such as Claude read, search and edit your workspace. It is off by default and only listens on your own machine.
+- **Yours to set up**: nineteen themes, including Catppuccin, Ayu, Kanagawa and Tokyo Night, and every shortcut can be changed.
 - **Search and command palette**: full-text search over titles, text and tags, and every command reachable from the keyboard.
 
 ## Getting started
