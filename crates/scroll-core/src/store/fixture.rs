@@ -259,9 +259,8 @@ impl Builder<'_> {
     /// Each property's value distribution; `None` leaves the cell empty.
     fn value_for(&mut self, property: &Property) -> Option<PropertyValue> {
         let random = &mut self.random;
-        let option = |random: &mut Random, weights: &[u32]| {
-            SelectOptionId::clone(&property.options[weighted(random, weights)].id)
-        };
+        let option =
+            |random: &mut Random, weights: &[u32]| property.options[weighted(random, weights)].id;
         match property.name.as_str() {
             "Status" if random.with_probability(0.97) => Some(PropertyValue::Select(option(
                 random,

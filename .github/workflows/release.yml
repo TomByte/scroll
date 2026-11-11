@@ -24,11 +24,9 @@ jobs:
         with:
           ref: ${{ env.TAG }}
 
-      - name: Install Rust targets
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      # The version in rust-toolchain.toml, with the components and targets it lists.
+      - name: Install Rust
+        run: rustup show active-toolchain || rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2
 

@@ -20,10 +20,9 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      # The version in rust-toolchain.toml, with the components and targets it lists.
       - name: Install Rust
-        run: |
-          rustup toolchain install stable --profile minimal --component rustfmt,clippy
-          rustup default stable
+        run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - name: Formatting
         run: cargo fmt --all --check
@@ -51,10 +50,9 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
+      # The version in rust-toolchain.toml, with the components and targets it lists.
       - name: Install Rust
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
+        run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - name: Tests
         run: cargo test -p scroll-server

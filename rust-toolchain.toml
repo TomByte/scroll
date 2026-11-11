@@ -1,0 +1,7 @@
+# The Rust version CI and releases build with, so a new compiler's lints cannot turn main red on
+# their own. Raise it deliberately, fixing whatever the newer clippy reports.
+[toolchain]
+channel = "1.97.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin"]
