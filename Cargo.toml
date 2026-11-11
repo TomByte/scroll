@@ -43,7 +43,7 @@ native-tls = "0.2"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 rcgen = "0.14"
 time = "0.3"
-jsonwebtoken = { version = "11", default-features = false, features = ["rust_crypto"] }
+jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs"] }
 base64 = "0.22"
 # Code block highlighting: Sublime grammars, with the pure-Rust regex engine (no Oniguruma C build).
 syntect = { version = "5.2", default-features = false, features = ["default-syntaxes", "regex-fancy"] }
