@@ -1,18 +1,21 @@
 //! Motion: every animation in the app, timed and eased in one place.
 //!
-//! There are two kinds, and nothing else:
+//! There are three kinds, and nothing else:
 //! - a `Motion`, played from the frame an element is first drawn under an id (an entrance, or
 //!   a fade out under a new id): `panel.motion(id, Motion::DropIn, window, cx)`;
 //! - a `Transition`, played when a value changes but not when it is first drawn:
 //!   `Transition::Select.fraction_on(id, is_selected, window, cx)` gives 0 to 1 as a row
-//!   becomes selected, and the component draws its own in-between state from it.
+//!   becomes selected, and the component draws its own in-between state from it;
+//! - a `Glide`, a distance covered a share per frame, for scrolling a jump smoothly:
+//!   `glide.push(distance)` when the jump is asked for, `glide.advance(window, cx)` each frame.
 //!
-//! Both are visual only: the element is interactive from its first frame and nothing waits
+//! All are visual only: the element is interactive from its first frame and nothing waits
 //! for an animation. Frames are requested only while one runs. Under
 //! `MotionPreference::Reduced` every element is drawn in its final state, with no state kept
 //! and no frames requested. Durations stay short (at most `Speed::Slow`) on purpose.
 
 mod entrance;
+mod glide;
 mod transition;
 
 use std::time::{Duration, Instant};
@@ -27,6 +30,7 @@ use crate::controls::switch::Switch;
 use crate::theme::Theme;
 
 pub use entrance::{Motion, MotionExt};
+pub use glide::Glide;
 pub use transition::Transition;
 
 /// Whether the app animates. `Reduced` draws every animated element in its final state at once.

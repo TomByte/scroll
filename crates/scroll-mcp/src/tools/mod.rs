@@ -108,6 +108,8 @@ pub(crate) enum ToolError {
     InvalidBlockId(String),
     #[error("{0:?} is not a block kind")]
     UnknownBlockKind(String),
+    #[error("a {0} block is part of a table and keeps its kind; change its text instead")]
+    TablePartKind(&'static str),
     #[error("the database has no property called {0:?}")]
     UnknownProperty(String),
     #[error("{property:?} has no option called {option:?}; its options are: {options}")]

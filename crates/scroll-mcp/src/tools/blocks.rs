@@ -110,6 +110,10 @@ pub(super) fn update_block(
     }
     writer.edit_content(arguments.page_id, |doc| {
         if let Some(kind) = kind {
+            let current = doc.block(id)?.kind;
+            if current.is_table_structure() {
+                return Err(ToolError::TablePartKind(current.name()));
+            }
             doc.set_block_kind(id, kind)?;
         }
         if let Some(text) = arguments.text.as_deref() {
@@ -173,9 +177,16 @@ fn parse_block_id(text: &str) -> Result<BlockId, ToolError> {
     BlockId::try_from(text).map_err(|_| ToolError::InvalidBlockId(text.to_string()))
 }
 
-fn parse_kind(name: &str) -> Result<BlockKind, ToolError> {
+/// The kinds a block can be given here. A table is a tree of rows and cells, which these tools
+/// cannot build one flat block at a time, so its kinds are only ever read.
+pub(super) fn writable_kinds() -> impl Iterator<Item = BlockKind> {
     BlockKind::ALL
         .into_iter()
+        .filter(|kind| !kind.is_table_structure())
+}
+
+fn parse_kind(name: &str) -> Result<BlockKind, ToolError> {
+    writable_kinds()
         .find(|kind| kind.name() == name)
         .ok_or_else(|| ToolError::UnknownBlockKind(name.to_string()))
 }
@@ -255,11 +266,16 @@ mod tests {
             ]
         );
         assert_eq!(blocks[1]["checked"], json!(true));
-        let wrong_kind: Vec<BlockInput> =
-            serde_json::from_value(json!([{"kind": "title"}])).unwrap();
-        assert!(matches!(
-            insert_blocks(&doc, None, &wrong_kind),
-            Err(ToolError::UnknownBlockKind(_))
-        ));
+        for kind in ["title", "table", "table_cell"] {
+            let wrong_kind: Vec<BlockInput> =
+                serde_json::from_value(json!([{"kind": kind}])).unwrap();
+            assert!(
+                matches!(
+                    insert_blocks(&doc, None, &wrong_kind),
+                    Err(ToolError::UnknownBlockKind(_))
+                ),
+                "{kind}"
+            );
+        }
     }
 }

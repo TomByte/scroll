@@ -10,6 +10,8 @@ pub enum SlashAction {
     TurnInto(BlockKind),
     /// Turns the block into a Mermaid diagram (a code block in the Mermaid language).
     MermaidDiagram,
+    /// Puts a table of text at the block.
+    Table,
     /// Makes a database page inside this page and opens it.
     CreateDatabase,
 }
@@ -24,7 +26,7 @@ pub struct SlashCommand {
     pub aliases: &'static [&'static str],
 }
 
-pub const SLASH_COMMANDS: [SlashCommand; 13] = [
+pub const SLASH_COMMANDS: [SlashCommand; 14] = [
     command(
         "Text",
         "Plain paragraph",
@@ -103,6 +105,13 @@ pub const SLASH_COMMANDS: [SlashCommand; 13] = [
         &["note", "info"],
     ),
     SlashCommand {
+        label: "Table",
+        hint: "Rows and columns of text",
+        action: SlashAction::Table,
+        icon: IconName::Table,
+        aliases: &["grid", "rows", "columns"],
+    },
+    SlashCommand {
         label: "Database",
         hint: "A table of pages",
         action: SlashAction::CreateDatabase,
@@ -160,7 +169,9 @@ mod tests {
         fn kind(&self) -> Option<BlockKind> {
             match self.action {
                 SlashAction::TurnInto(kind) => Some(kind),
-                SlashAction::MermaidDiagram | SlashAction::CreateDatabase => None,
+                SlashAction::MermaidDiagram | SlashAction::Table | SlashAction::CreateDatabase => {
+                    None
+                }
             }
         }
     }
@@ -208,5 +219,10 @@ mod tests {
             matching_commands("flowchart")[0].action,
             SlashAction::MermaidDiagram
         );
+        let tables: Vec<SlashAction> = matching_commands("table")
+            .into_iter()
+            .map(|command| command.action)
+            .collect();
+        assert_eq!(tables, [SlashAction::Table, SlashAction::CreateDatabase]);
     }
 }

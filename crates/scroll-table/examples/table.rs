@@ -439,6 +439,7 @@ fn page(title: &str, parent: Option<PageId>, row_of: Option<DatabaseId>) -> Page
         position: Position::between(None, None).expect("an empty range has room"),
         row_of,
         is_archived: false,
+        is_folder: false,
     }
 }
 

@@ -24,10 +24,15 @@ pub enum BlockKind {
     Code,
     Divider,
     Callout,
+    /// A grid of text: its children are `TableRow`s, and each row's children are `TableCell`s,
+    /// which hold the text. The table and its rows have none of their own.
+    Table,
+    TableRow,
+    TableCell,
 }
 
 impl BlockKind {
-    pub const ALL: [BlockKind; 11] = [
+    pub const ALL: [BlockKind; 14] = [
         BlockKind::Paragraph,
         BlockKind::Heading1,
         BlockKind::Heading2,
@@ -39,6 +44,9 @@ impl BlockKind {
         BlockKind::Code,
         BlockKind::Divider,
         BlockKind::Callout,
+        BlockKind::Table,
+        BlockKind::TableRow,
+        BlockKind::TableCell,
     ];
 
     /// Stored in the document, so these strings must never change.
@@ -55,7 +63,19 @@ impl BlockKind {
             BlockKind::Code => "code",
             BlockKind::Divider => "divider",
             BlockKind::Callout => "callout",
+            BlockKind::Table => "table",
+            BlockKind::TableRow => "table_row",
+            BlockKind::TableCell => "table_cell",
         }
+    }
+
+    /// Whether the kind is a table or one of its parts. These get their meaning from where they
+    /// sit in a table, so a block is never turned into one, or out of one, by its kind alone.
+    pub fn is_table_structure(self) -> bool {
+        matches!(
+            self,
+            BlockKind::Table | BlockKind::TableRow | BlockKind::TableCell
+        )
     }
 
     /// A kind written by a newer app version reads as a paragraph, so its text still shows.

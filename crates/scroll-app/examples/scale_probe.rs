@@ -342,5 +342,6 @@ fn page(title: &str, parent: Option<PageId>, position: Position) -> Page {
         position,
         row_of: None,
         is_archived: false,
+        is_folder: false,
     }
 }

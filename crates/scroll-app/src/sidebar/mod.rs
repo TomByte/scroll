@@ -1,6 +1,7 @@
 //! The page tree: navigation, create, rename in place, drag to reorder or nest, context
 //! menu, and the trash. All tree logic lives in `workspace::page_tree`; this view only maps
-//! pointer and keyboard input onto it.
+//! pointer and keyboard input onto it. A folder is a row like a page's that holds other rows
+//! and opens and closes instead of opening a page.
 
 mod resize;
 mod rows;
@@ -12,9 +13,9 @@ use std::rc::Rc;
 
 use gpui::{
     App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, ParentElement, Pixels, Point, Render, SharedString, StatefulInteractiveElement,
-    Styled, Subscription, Task, UniformListScrollHandle, Window, div, prelude::FluentBuilder,
-    uniform_list,
+    IntoElement, ParentElement, Pixels, Point, Render, ScrollStrategy, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, Task, UniformListScrollHandle, Window, div,
+    prelude::FluentBuilder, uniform_list,
 };
 use scroll_core::id::{PageId, TagId};
 use scroll_core::record::Page;
@@ -27,7 +28,7 @@ use scroll_ui::{
 use crate::accounts::switcher::{current_workspace_name, switcher_menu};
 use crate::commands::{Command, hint};
 use crate::overlays::Overlays;
-use crate::page::commands::{NEW_DATABASE, NEW_PAGE};
+use crate::page::commands::{NEW_DATABASE, NEW_FOLDER, NEW_PAGE};
 use crate::palette::commands::OPEN_PALETTE;
 use crate::sync_status::empty_text;
 use crate::title_bar;
@@ -223,18 +224,42 @@ impl Sidebar {
 
     /// Expands the open page's loaded ancestors, so its row shows once its parents load.
     fn expand_to_current_page(&mut self, cx: &mut Context<Self>) {
-        let Some(page) = self.current_page else {
-            return;
-        };
+        if let Some(page) = self.current_page {
+            self.expand_ancestors_of(page, cx);
+        }
+    }
+
+    /// Expands `page`'s loaded ancestors, so its row shows.
+    fn expand_ancestors_of(&mut self, page: PageId, cx: &mut Context<Self>) {
         let ancestors = self.workspace.read(cx).tree().ancestors_and_self(page);
+        self.expand(&ancestors[1..], cx);
+    }
+
+    fn expand(&mut self, pages: &[PageId], cx: &mut Context<Self>) {
         let mut is_newly_expanded = false;
-        for ancestor in ancestors.iter().skip(1) {
-            is_newly_expanded |= self.expanded.insert(*ancestor);
+        for page in pages {
+            is_newly_expanded |= self.expanded.insert(*page);
         }
         if is_newly_expanded {
             self.rows = None;
             self.load_expanded_children(cx);
             cx.emit(SidebarEvent::ExpandedChanged);
+        }
+    }
+
+    /// Shows what is in `folder`: opens it and every folder or page it is inside, and scrolls
+    /// to it.
+    pub fn reveal_folder(&mut self, folder: PageId, cx: &mut Context<Self>) {
+        let folder_and_ancestors = self.workspace.read(cx).tree().ancestors_and_self(folder);
+        self.expand(&folder_and_ancestors, cx);
+        self.scroll_to_row_of(folder, cx);
+        cx.notify();
+    }
+
+    fn scroll_to_row_of(&mut self, page: PageId, cx: &App) {
+        let row = self.rows(cx).iter().position(|row| row.id == page);
+        if let Some(row) = row {
+            self.scroll.scroll_to_item(row, ScrollStrategy::Center);
         }
     }
 
@@ -279,6 +304,9 @@ impl Sidebar {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The row has to be on screen to be typed in.
+        self.expand_ancestors_of(page, cx);
+        self.scroll_to_row_of(page, cx);
         let title = self
             .workspace
             .read(cx)
@@ -332,6 +360,7 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) {
         let can_edit = !self.workspace.read(cx).is_read_only();
+        let is_folder = self.workspace.read(cx).tree().is_folder(page);
         let self_entity = cx.entity().downgrade();
         let sidebar = cx.entity().downgrade();
         let action = move |run: fn(&mut Sidebar, PageId, &mut Window, &mut Context<Sidebar>)| {
@@ -343,18 +372,18 @@ impl Sidebar {
                 }
             }
         };
-        // "Open" plus every command that offers itself in the page menu, acting on this page.
+        // "Open" (a folder has no page to open) plus every command that offers itself in the
+        // page menu, acting on this page.
         self.popups.update(cx, |popups, cx| {
             popups.show(
                 PopupAnchor::Point(position),
                 |_, cx| {
-                    let mut menu = Menu::new(cx).item(
-                        MenuItem::new(
-                            "Open",
-                            action(|_, page, _, cx| cx.emit(SidebarEvent::OpenPage(page))),
-                        )
-                        .icon(IconName::Page),
-                    );
+                    let open = MenuItem::new(
+                        "Open",
+                        action(|_, page, _, cx| cx.emit(SidebarEvent::OpenPage(page))),
+                    )
+                    .icon(IconName::Page);
+                    let mut menu = Menu::new(cx).items((!is_folder).then_some(open));
                     let usable = |command: &&&'static Command| {
                         command.is_in_page_menu && command.is_allowed(can_edit)
                     };
@@ -456,6 +485,13 @@ impl Render for Sidebar {
                                     .icon(IconName::Table)
                                     .on_click(cx.listener(|_, _, _, cx| {
                                         cx.emit(SidebarEvent::RunCommand(NEW_DATABASE, None))
+                                    })),
+                            )
+                            .child(
+                                ListItem::new("new-folder", "New folder")
+                                    .icon(IconName::Folder)
+                                    .on_click(cx.listener(|_, _, _, cx| {
+                                        cx.emit(SidebarEvent::RunCommand(NEW_FOLDER, None))
                                     })),
                             )
                     }),

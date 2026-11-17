@@ -129,6 +129,8 @@ fn set_up_ui(cx: &mut App) {
     editor::init(cx);
     scroll_settings::register(settings::SETTINGS, cx);
     scroll_settings::register(page_layout::SETTINGS, cx);
+    scroll_settings::register(editor::outline::SETTINGS, cx);
+    scroll_settings::register(editor::scrolling::SETTINGS, cx);
     scroll_settings::register(mcp::SETTINGS, cx);
     settings::follow_motion(cx);
     mcp::init(cx);

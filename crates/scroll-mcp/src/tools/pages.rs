@@ -44,6 +44,7 @@ pub(super) fn list_pages(store: &WorkspaceStore, arguments: ListPages) -> Result
                 "id": child.page.id.0,
                 "title": child.page.title,
                 "icon": child.page.icon,
+                "is_folder": child.page.is_folder,
                 "child_count": child.child_count,
                 "database_id": child.hosted_database.map(|database| database.0),
             })
@@ -72,6 +73,7 @@ pub(super) fn get_page(store: &WorkspaceStore, arguments: GetPage) -> Result<Val
         "icon": page.icon,
         "parent_id": page.parent.map(|parent| parent.0),
         "is_archived": page.is_archived,
+        "is_folder": page.is_folder,
         "tags": tags,
         "blocks": blocks,
     });
@@ -141,6 +143,7 @@ pub(super) fn create_page(writer: &mut Writer, arguments: CreatePage) -> Result<
         position: Position::between(last_sibling.as_ref(), None)?,
         row_of: None,
         is_archived: false,
+        is_folder: false,
     };
     let id = page.id;
     writer.apply(&Transaction::new(vec![Operation::Create(Record::Page(

@@ -3,6 +3,7 @@
 use crate::accounts::commands::AccountRequest;
 use crate::accounts::flows;
 use crate::commands::hint;
+use crate::editor::outline::SHOW_OUTLINE;
 use crate::page_layout::{PAGE_WIDTH, PageWidth};
 use crate::sync_status::status_text;
 use crate::title_bar::{self, TRAFFIC_LIGHTS_WIDTH};
@@ -118,15 +119,42 @@ impl AppWindow {
             )
             .children(self.render_people(theme, cx))
             .children(self.render_connection(theme, cx))
+            .children(self.render_outline_toggle(cx))
             .children(self.render_page_width_toggle(cx))
             .into_any_element()
     }
 
-    /// Flips the page width setting; shown only for a document, as databases always fill the
-    /// window.
+    /// Whether the open page is a document: a database has no headings to outline and always
+    /// fills the window.
+    fn is_document_open(&self, cx: &Context<Self>) -> bool {
+        self.page
+            .as_ref()
+            .is_some_and(|page| page.read(cx).database_view().is_none())
+    }
+
+    /// Shows or hides the outline beside a document.
+    fn render_outline_toggle(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.is_document_open(cx) {
+            return None;
+        }
+        let is_shown = SHOW_OUTLINE.get(cx);
+        Some(
+            IconButton::new("outline", IconName::Outline)
+                .size(ButtonSize::Small)
+                .tooltip(if is_shown {
+                    "Hide the outline"
+                } else {
+                    "Show the page's headings as an outline"
+                })
+                .when(is_shown, IconButton::selected)
+                .on_click(|_, _, cx| SHOW_OUTLINE.set(!SHOW_OUTLINE.get(cx), cx))
+                .into_any_element(),
+        )
+    }
+
+    /// Flips the page width setting; shown only for a document.
     fn render_page_width_toggle(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let page = self.page.as_ref()?.read(cx);
-        if page.database_view().is_some() {
+        if !self.is_document_open(cx) {
             return None;
         }
         let is_full = PAGE_WIDTH.get(cx) == PageWidth::Full;

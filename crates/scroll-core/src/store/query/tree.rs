@@ -119,7 +119,40 @@ mod tests {
             position: position.clone(),
             row_of: None,
             is_archived: false,
+            is_folder: false,
         }
+    }
+
+    #[test]
+    fn a_folder_is_kept_as_one_and_lists_the_pages_under_it() {
+        let mut store = open_in_memory();
+        let position = Position::between(None, None).unwrap();
+        let folder = Page {
+            is_folder: true,
+            ..page("Projects", None, &position)
+        };
+        let inside = page("Plan", Some(folder.id), &position);
+        store
+            .apply_local_transaction(&Transaction::new(vec![
+                Operation::Create(Record::Page(folder.clone())),
+                Operation::Create(Record::Page(inside.clone())),
+            ]))
+            .unwrap();
+
+        let top = store.page_children(None, None, 10).unwrap();
+        assert_eq!(top.len(), 1);
+        assert_eq!(
+            (top[0].page.clone(), top[0].child_count),
+            (folder.clone(), 1)
+        );
+        assert!(!store.page(inside.id).unwrap().unwrap().is_folder);
+
+        // A rename writes one field and leaves the rest of the row, the folder flag included.
+        store
+            .apply_local_transaction(&Transaction::set_title(folder.id, "Work"))
+            .unwrap();
+        let renamed = store.page(folder.id).unwrap().unwrap();
+        assert_eq!((renamed.title.as_str(), renamed.is_folder), ("Work", true));
     }
 
     #[test]

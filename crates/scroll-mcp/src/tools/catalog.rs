@@ -29,14 +29,17 @@ impl Tool {
         match self {
             Tool::ListPages => {
                 "Lists the pages directly under a page, or the workspace's top-level pages, in \
-                 sidebar order. Database rows and archived pages are not listed; use \
+                 sidebar order. A page with is_folder true is a folder: it has no content, only \
+                 the pages under it. Database rows and archived pages are not listed; use \
                  query_database for rows. Pass next_after as after to get the next batch."
             }
             Tool::GetPage => {
                 "Reads one page whole: title, icon, tags and its blocks in document order (nested \
                  blocks follow their parent with a greater depth; text is plain, without \
-                 formatting). A page hosting a database also returns its properties and views; a \
-                 database row returns its values by property name."
+                 formatting). A table is a table block followed by its table_row blocks, each \
+                 followed by its table_cell blocks, which hold the text. A page hosting a \
+                 database also returns its properties and views; a database row returns its \
+                 values by property name."
             }
             Tool::Search => {
                 "Full-text search over page titles, page text and tag names, best match first. \
@@ -206,7 +209,9 @@ fn object(properties: Value, required: &[&str]) -> Value {
 }
 
 fn kind_schema() -> Value {
-    let kinds: Vec<&str> = BlockKind::ALL.into_iter().map(BlockKind::name).collect();
+    let kinds: Vec<&str> = super::blocks::writable_kinds()
+        .map(BlockKind::name)
+        .collect();
     json!({"enum": kinds, "default": "paragraph"})
 }
 

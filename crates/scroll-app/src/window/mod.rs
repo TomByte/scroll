@@ -149,9 +149,27 @@ impl AppWindow {
         self.window_handle
     }
 
+    /// Opens `page`. A folder has no page of its own, so it is shown, open, in the sidebar.
     pub fn open_page(&mut self, page: PageId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.workspace.read(cx).tree().is_folder(page) {
+            return self.reveal_folder(page, cx);
+        }
         self.history.visit(page);
         self.show_page(page, window, cx);
+    }
+
+    fn reveal_folder(&mut self, folder: PageId, cx: &mut Context<Self>) {
+        self.sidebar
+            .update(cx, |sidebar, cx| sidebar.reveal_folder(folder, cx));
+    }
+
+    /// What a command just made: a page is opened, a folder is named where it stands in the
+    /// sidebar.
+    fn open_created(&mut self, created: PageId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.workspace.read(cx).tree().is_folder(created) {
+            return self.rename_page(Some(created), window, cx);
+        }
+        self.open_page(created, window, cx);
     }
 
     pub(crate) fn current_page(&self) -> Option<PageId> {
@@ -242,11 +260,12 @@ impl AppWindow {
         cx.notify();
     }
 
-    /// A page that was opened is gone (an old setting or link): forget it, and if it is the
-    /// current page show the one before it, else the first page.
-    fn leave_missing_page(&mut self, missing: PageId, window: &mut Window, cx: &mut Context<Self>) {
-        let was_current = self.current_page() == Some(missing);
-        self.history.forget(missing);
+    /// A page that was opened cannot be shown (it is gone, an old setting or link; or it is a
+    /// folder): forget it, and if it is the current page show the one before it, else the
+    /// first page.
+    fn leave_unopenable_page(&mut self, page: PageId, window: &mut Window, cx: &mut Context<Self>) {
+        let was_current = self.current_page() == Some(page);
+        self.history.forget(page);
         if was_current {
             self.show_next_page(window, cx);
         }

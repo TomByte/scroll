@@ -301,6 +301,7 @@ pub(super) fn create_row(writer: &mut Writer, arguments: CreateRow) -> Result<Va
         position: Position::between(last.as_ref(), None)?,
         row_of: Some(database.id),
         is_archived: false,
+        is_folder: false,
     };
     let id = page.id;
     let mut operations = vec![Operation::Create(Record::Page(page))];

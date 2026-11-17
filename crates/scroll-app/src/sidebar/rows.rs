@@ -23,7 +23,7 @@ impl Sidebar {
         let page = row.id;
         // Viewers can open pages but not add, move or rename them.
         let can_edit = !self.workspace.read(cx).is_read_only();
-        let (title, icon) = self
+        let (title, icon, is_folder) = self
             .workspace
             .read(cx)
             .tree()
@@ -32,6 +32,7 @@ impl Sidebar {
                 (
                     display_title(&stored.title).to_string(),
                     stored.icon.clone(),
+                    stored.is_folder,
                 )
             })
             .unwrap_or_default();
@@ -95,6 +96,10 @@ impl Sidebar {
 
         div()
             .id(ElementId::Name(group.clone()))
+            .debug_selector({
+                let title = title.clone();
+                move || format!("tree-row-{title}")
+            })
             .group(group)
             .relative()
             .rounded(theme.radius.md)
@@ -117,7 +122,9 @@ impl Sidebar {
             .child(
                 TreeItem::new(ElementId::Name(format!("page-{}", page.0).into()), title)
                     .depth(row.depth)
-                    .icon(if is_database {
+                    .icon(if is_folder {
+                        IconName::Folder
+                    } else if is_database {
                         IconName::Table
                     } else {
                         IconName::Page
@@ -127,7 +134,14 @@ impl Sidebar {
                     .disclosure(disclosure)
                     .when(self.current_page == Some(page), TreeItem::selected)
                     .hover_end_slot(hover_actions)
-                    .on_click(cx.listener(move |_, _, _, cx| cx.emit(SidebarEvent::OpenPage(page))))
+                    // A folder has no page to open: a click shows or hides what is in it.
+                    .on_click(cx.listener(move |sidebar, _, _, cx| {
+                        if is_folder {
+                            sidebar.toggle_expanded(page, cx)
+                        } else {
+                            cx.emit(SidebarEvent::OpenPage(page))
+                        }
+                    }))
                     .on_toggle(
                         cx.listener(move |sidebar, _, _, cx| sidebar.toggle_expanded(page, cx)),
                     )

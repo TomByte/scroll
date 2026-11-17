@@ -28,7 +28,7 @@ The server uses `tokio-postgres` rather than `sqlx` because `sqlx` pulls in a se
 
 ## What we take from Notion
 
-- **Everything is a block, and pages are blocks.** Kept. A database row is a page with property values.
+- **Everything is a block, and pages are blocks.** Kept. A database row is a page with property values, and a folder is a page with no content.
 - **Edits are operations batched into transactions.** The client applies them locally, queues them in SQLite, then sends them; the server validates and commits all or nothing. Kept for records.
 - **Clients subscribe to records over a WebSocket.** Notion's socket only announces new versions and the client then fetches them. Changed: our socket carries the change itself.
 - **Children stored as an ordered array on the parent.** Changed: each page stores its parent and a position, so a move is one field write and concurrent inserts cannot conflict.
@@ -38,11 +38,11 @@ The server uses `tokio-postgres` rather than `sqlx` because `sqlx` pulls in a se
 
 Two kinds of data, with different conflict rules.
 
-**Page content (CRDT).** Each page has one Loro document holding its block tree and each block's rich text with marks. Concurrent typing, formatting and block moves merge without a server decision. Loro also supplies stable cursors and per-user undo.
+**Page content (CRDT).** Each page has one Loro document holding its block tree and each block's rich text with marks. Concurrent typing, formatting and block moves merge without a server decision. Loro also supplies stable cursors and per-user undo. A table is part of the same tree: a table block's children are its rows and a row's children are its cells, each cell a block of text like any other.
 
 **Records (operations).** Everything that needs querying or permission checks. The record kinds are:
 
-- `page`: parent page, title, icon, position, archived flag; a row also names the database it belongs to and carries its property values.
+- `page`: parent page, title, icon, position, archived flag, and whether it is a folder (a place for pages in the tree, decided when it is made); a row also names the database it belongs to and carries its property values.
 - `database`: the page that hosts it and its property schema (name, type, options per property).
 - `view`: database, name, filter, sort, visible columns and column widths.
 - `tag`: a workspace-level name and colour.
@@ -95,7 +95,7 @@ One Cargo workspace, nine crates. Dependencies point one way. `scroll-core` is u
 
 - `scroll-core` — record kinds, operations, validation rules, the SQLite store, Loro page documents, search. No GPUI and no networking. Everything about a record kind sits in `record/`, `validation/` and `store/kinds/`.
 - `scroll-api` — everything on the wire: HTTP request and response types, error codes, paths, the WebSocket protocol, size limits and connection timing. Used by the server, the client, tools and tests.
-- `scroll-ui` — the GPUI component kit: theme tokens and components. Knows nothing about Scroll's data. Adding a component is one file (component, gallery story, test), a line in its group's `mod.rs`, one export line and one line in the gallery; the recipe is at the top of `src/lib.rs`. `cargo run -p scroll-ui --example gallery` shows every component in light and dark. Every animation goes through `motion/`: an entrance (`Motion`) or a change (`Transition`), with durations and easings in one place and nothing animated under reduced motion.
+- `scroll-ui` — the GPUI component kit: theme tokens and components. Knows nothing about Scroll's data. Adding a component is one file (component, gallery story, test), a line in its group's `mod.rs`, one export line and one line in the gallery; the recipe is at the top of `src/lib.rs`. `cargo run -p scroll-ui --example gallery` shows every component in light and dark. Every animation goes through `motion/`: an entrance (`Motion`), a change (`Transition`) or a distance scrolled smoothly (`Glide`), with durations and easings in one place and nothing animated under reduced motion.
 - `scroll-settings` — preferences: a typed `Setting` declared as a `const` beside the code that uses it, kept in `preferences.json`, and listed on the settings page by category. GPUI only; the recipe is at the top of `src/lib.rs`.
 - `scroll-mcp` — the Model Context Protocol server AI tools use to read, search and change the open workspace. No GPUI. It runs inside the app while its setting is on, on its own thread with its own connection to the workspace file (as the table view and sync engine have), listens on 127.0.0.1 only and requires a token made at runtime and kept in the data directory. Its writes go through `apply_local_transaction` and `record_local_page_update`, and are reported to the app as events so the window and the sync engine follow.
 - `scroll-table` — the database table view and the one home of property-value display and parsing (`values`).
@@ -118,6 +118,7 @@ Tools: `scroll-core` examples `fixture` and `scale`; `scroll-table` example `tab
 - **GPUI is pre-1.0.** Releases on crates.io lag Zed's main branch and can break APIs. We pin the version and upgrade deliberately. GPUI shapes one font size per line.
 - **One server process.** Relays, rate limits and live sessions are in memory. Running several processes behind a load balancer needs Postgres `LISTEN/NOTIFY` or similar; a design exists, nothing is built.
 - **Merging blocks** can lose a peer's concurrent typing in the merged block. The fix is one rich-text container per page, a stored-format change.
+- **Tables** are plain grids: columns share the width equally, and a row added by one person at the moment another adds a column is a cell short (drawn padded) until someone clicks the gap, which fills it in.
 
 ## Open questions
 

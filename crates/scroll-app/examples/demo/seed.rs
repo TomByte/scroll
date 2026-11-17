@@ -348,6 +348,7 @@ impl Seeder {
             position,
             row_of: None,
             is_archived: false,
+            is_folder: false,
         })
     }
 

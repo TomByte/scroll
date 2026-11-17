@@ -106,6 +106,7 @@ fn page(row_of: Option<DatabaseId>, position: Position) -> Page {
         position,
         row_of,
         is_archived: false,
+        is_folder: false,
     }
 }
 

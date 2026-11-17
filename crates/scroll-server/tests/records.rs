@@ -22,6 +22,7 @@ fn new_page(title: &str, parent: Option<PageId>) -> Page {
         position: Position::between(None, None).unwrap(),
         row_of: None,
         is_archived: false,
+        is_folder: false,
     }
 }
 
@@ -102,6 +103,56 @@ async fn two_clients_converge_on_records() {
         .unwrap();
     assert_eq!(snapshot.seq, 2);
     assert_eq!(snapshot_pages(&snapshot), vec![page]);
+}
+
+#[tokio::test]
+async fn a_folder_reaches_other_clients_and_later_ones_as_a_folder() {
+    let server = TestServer::start().await;
+    let owner = server.new_user().await;
+    let workspace_id = server.create_workspace(&owner).await;
+    let mut writer = server.connect(&owner).await;
+    let mut watcher = server.connect(&owner).await;
+    writer.open_workspace(workspace_id, 0).await;
+    watcher.open_workspace(workspace_id, 0).await;
+    let folder = Page {
+        is_folder: true,
+        ..new_page("Projects", None)
+    };
+    let inside = new_page("Plan", Some(folder.id));
+
+    let created = Transaction::new(vec![
+        Operation::Create(Record::Page(folder.clone())),
+        Operation::Create(Record::Page(inside.clone())),
+    ]);
+    writer.commit(workspace_id, &created).await;
+    assert_eq!(
+        watcher.receive().await,
+        ServerMessage::RemoteTransaction {
+            workspace_id,
+            seq: 1,
+            author: owner.user_id,
+            transaction: created
+        }
+    );
+    // Archiving writes the byte the folder flag shares; the flag must survive it.
+    let archived = set_page(folder.id, PageField::IsArchived(true));
+    writer.commit(workspace_id, &archived).await;
+
+    let mut newcomer = server.connect(&owner).await;
+    let snapshot = newcomer
+        .open_workspace(workspace_id, 0)
+        .await
+        .snapshot
+        .unwrap();
+    let mut expected = vec![
+        Page {
+            is_archived: true,
+            ..folder
+        },
+        inside,
+    ];
+    expected.sort_by_key(|page| page.id);
+    assert_eq!(snapshot_pages(&snapshot), expected);
 }
 
 #[tokio::test]

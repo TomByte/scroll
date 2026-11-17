@@ -108,6 +108,10 @@ pub struct Workspace {
 
 impl EventEmitter<WorkspaceEvent> for Workspace {}
 
+/// Makes something under a parent out of the records as they stand: the new page's id and
+/// the transaction that creates it.
+type MakeUnder = fn(&WorkspaceRecords, Option<PageId>) -> Result<(PageId, Transaction), MoveError>;
+
 /// The workspace open in the window, for code outside the window that acts on it.
 #[derive(Default)]
 struct CurrentWorkspace(Option<Entity<Workspace>>);
@@ -224,20 +228,20 @@ impl Workspace {
         parent: Option<PageId>,
         cx: &mut Context<Self>,
     ) -> Task<Option<PageId>> {
-        let creating =
-            self.after_children_loaded(parent, cx, move |workspace, cx| {
-                match workspace.records.tree.create_page(parent, "") {
-                    Ok((id, transaction)) => {
-                        workspace.commit(transaction, cx);
-                        Some(id)
-                    }
-                    Err(error) => {
-                        log::error!("could not place a new page: {error}");
-                        None
-                    }
-                }
-            });
-        cx.spawn(async move |_, _| creating.await.flatten())
+        self.create_under(parent, cx, |records, parent| {
+            records.tree.create_page(parent, "")
+        })
+    }
+
+    /// Creates an untitled folder as the last child of `parent`; resolves to the folder.
+    pub fn create_folder(
+        &mut self,
+        parent: Option<PageId>,
+        cx: &mut Context<Self>,
+    ) -> Task<Option<PageId>> {
+        self.create_under(parent, cx, |records, parent| {
+            records.tree.create_folder(parent, "")
+        })
     }
 
     /// Creates a page holding a new, empty database under `parent`; resolves to the page.
@@ -246,17 +250,27 @@ impl Workspace {
         parent: Option<PageId>,
         cx: &mut Context<Self>,
     ) -> Task<Option<PageId>> {
-        let creating = self.after_children_loaded(parent, cx, move |workspace, cx| match workspace
-            .records
-            .create_database(parent)
-        {
-            Ok((id, transaction)) => {
-                workspace.commit(transaction, cx);
-                Some(id)
-            }
-            Err(error) => {
-                log::error!("could not place a new database: {error}");
-                None
+        self.create_under(parent, cx, WorkspaceRecords::create_database)
+    }
+
+    /// Commits what `make` creates as the last child of `parent`, once the parent's children
+    /// are loaded (its place among them is not known before), and resolves to the new page.
+    fn create_under(
+        &mut self,
+        parent: Option<PageId>,
+        cx: &mut Context<Self>,
+        make: MakeUnder,
+    ) -> Task<Option<PageId>> {
+        let creating = self.after_children_loaded(parent, cx, move |workspace, cx| {
+            match make(&workspace.records, parent) {
+                Ok((id, transaction)) => {
+                    workspace.commit(transaction, cx);
+                    Some(id)
+                }
+                Err(error) => {
+                    log::error!("could not place what was being created: {error}");
+                    None
+                }
             }
         });
         cx.spawn(async move |_, _| creating.await.flatten())

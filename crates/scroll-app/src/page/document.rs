@@ -102,7 +102,7 @@ impl PageView {
         let theme = Theme::current(window, cx);
         editor.update(cx, |editor, cx| {
             editor.draw_first_screen_diagrams(&theme, cx);
-            editor.build_first_screen_grammars(cx);
+            editor.build_page_grammars(cx);
         });
         self.mark_ready_when(&editor, is_first_screen_ready, cx);
         self.body = Body::Document(editor);

@@ -4,6 +4,7 @@ use self::commands::WindowCommand;
 use crate::accounts::commands::AccountRequest;
 use crate::accounts::{Accounts, OpenWorkspace, flows, request_open_workspace};
 use crate::commands::{PageKind, Run, Situation, Surface, Target};
+use crate::editor::outline::SHOW_OUTLINE;
 use crate::mcp::CopyConnectionCommand;
 use crate::page::commands::{PageCommand, RenamePage};
 use crate::page_layout::PAGE_WIDTH;
@@ -82,7 +83,8 @@ impl AppWindow {
         }
     }
 
-    /// Carries out a change to the workspace's pages, and opens the page it makes, if any.
+    /// Carries out a change to the workspace's pages, and opens (or, for a folder, names) what
+    /// it makes, if anything.
     fn run_page_command(
         &mut self,
         action: &dyn gpui::Action,
@@ -98,7 +100,7 @@ impl AppWindow {
                 return;
             };
             if let Err(error) =
-                this.update_in(cx, |this, window, cx| this.open_page(page, window, cx))
+                this.update_in(cx, |this, window, cx| this.open_created(page, window, cx))
             {
                 log::debug!("the window closed before a new page opened: {error}");
             }
@@ -157,6 +159,7 @@ impl AppWindow {
             WindowCommand::GoBack => self.go_back(window, cx),
             WindowCommand::GoForward => self.go_forward(window, cx),
             WindowCommand::ToggleSidebar => self.toggle_sidebar(cx),
+            WindowCommand::ToggleOutline => SHOW_OUTLINE.set(!SHOW_OUTLINE.get(cx), cx),
             WindowCommand::TogglePageWidth => PAGE_WIDTH.set(PAGE_WIDTH.get(cx).toggled(), cx),
             WindowCommand::Theme(preference) => THEME.set(*preference, cx),
             WindowCommand::Close => window.remove_window(),

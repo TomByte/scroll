@@ -241,6 +241,8 @@ const MIGRATIONS: &[Migration] = &[
     CREATE INDEX page_tag_of_gone_page ON page_tag (tag_id) WHERE is_page_gone;
     CREATE INDEX page_archived ON page (id) WHERE is_archived;
     "),
+    // Pages that are folders: they group the pages under them and have no content.
+    Migration::Sql("ALTER TABLE page ADD COLUMN is_folder INTEGER NOT NULL DEFAULT 0;"),
 ];
 
 /// Whether the file's schema is behind this build's, so opening it will run migrations.
@@ -319,6 +321,38 @@ mod tests {
         migrate(&mut conn).unwrap();
         let touching = queued_transactions_touching(&conn, &[RecordId::Page(page)]).unwrap();
         assert_eq!(touching, vec![transaction]);
+    }
+
+    #[test]
+    fn pages_stored_before_folders_are_not_folders() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        // Migrations are append-only, so the folder column stays at this index.
+        let folder_step = 17;
+        let Migration::Sql(sql) = &MIGRATIONS[folder_step] else {
+            panic!("step {folder_step} is not the folder column");
+        };
+        assert!(sql.contains("ADD COLUMN is_folder"));
+        for migration in &MIGRATIONS[..folder_step] {
+            match migration {
+                Migration::Sql(sql) => conn.execute_batch(sql).unwrap(),
+                Migration::Code(step) => step(&conn).unwrap(),
+            }
+        }
+        conn.pragma_update(None, "user_version", folder_step)
+            .unwrap();
+        let page = PageId::generate();
+        let position = crate::position::Position::between(None, None).unwrap();
+        conn.execute(
+            "INSERT INTO page (id, title, position, is_archived) VALUES (?1, 'Old', ?2, 0)",
+            rusqlite::params![page, position],
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+        let stored = crate::store::kinds::page::read_page(&conn, page)
+            .unwrap()
+            .unwrap();
+        assert_eq!((stored.title.as_str(), stored.is_folder), ("Old", false));
     }
 
     #[test]

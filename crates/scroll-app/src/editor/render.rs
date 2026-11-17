@@ -11,6 +11,7 @@ use scroll_ui::{
 };
 
 use super::block_element::BlockElement;
+use super::scrolling::{glide_on_wheel, page_area_hitbox};
 use super::{
     BLOCK_MARKER_WIDTH, BlockState, KEY_CONTEXT, NEST_INDENT, PageEditor, QUOTE_BAR_WIDTH,
 };
@@ -25,13 +26,12 @@ impl Render for PageEditor {
         let theme = Theme::current(window, cx);
         self.frame += 1;
         self.begin_drag_motion_frame(cx);
-        self.reveal_caret_if_needed(window);
-        let editor = cx.entity().downgrade();
-        let blocks = list(
-            self.list_state.clone(),
-            cx.processor(|editor, index: usize, window, cx| editor.render_row(index, window, cx)),
-        )
-        .size_full();
+        self.advance_glide(window, cx);
+        let visible_rows = self.scroll.visible_rows();
+        self.reveal_caret_if_needed(&visible_rows, window);
+        self.note_place_at_layout();
+        let page_area = self.render_page_area(cx);
+        let outline = self.render_outline(&visible_rows, &theme, cx);
         let completion = self.render_completion(cx);
         let link_prompt = self.render_link_prompt(&theme, cx);
 
@@ -96,21 +96,46 @@ impl Render for PageEditor {
             .on_drag_move(cx.listener(Self::drag_blocks_over))
             .on_drop(cx.listener(Self::drop_blocks))
             .relative()
+            .flex()
             .size_full()
             .text_color(theme.colors.text)
+            .child(page_area)
+            .children(outline)
+            .children(completion)
+            .child(self.popups.clone())
+            .children(link_prompt)
+    }
+}
+
+impl PageEditor {
+    /// The scrolling column of blocks with its scrollbar: everything but the outline.
+    fn render_page_area(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let editor = cx.entity().downgrade();
+        let blocks = list(
+            self.scroll.list(),
+            cx.processor(|editor, index: usize, window, cx| editor.render_row(index, window, cx)),
+        )
+        .size_full();
+        div()
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .h_full()
             .child(
                 canvas(
                     {
                         let editor = editor.clone();
-                        move |bounds, _, cx| {
+                        move |bounds, window, cx| {
                             if let Some(editor) = editor.upgrade() {
                                 editor.update(cx, |editor, _| editor.viewport = Some(bounds));
                             }
+                            page_area_hitbox(bounds, window)
                         }
                     },
                     // Typing reaches the editor even when the caret's block is scrolled out of
                     // view (the list does not paint it then), so input is registered here.
-                    move |bounds, _, window, cx| {
+                    move |bounds, page_area, window, cx| {
+                        glide_on_wheel(editor.clone(), &page_area, window);
                         let Some(editor) = editor.upgrade() else {
                             return;
                         };
@@ -126,14 +151,9 @@ impl Render for PageEditor {
                 .size_full(),
             )
             .child(blocks)
-            .child(Scrollbar::new("page-scrollbar", self.list_state.clone()))
-            .children(completion)
-            .child(self.popups.clone())
-            .children(link_prompt)
+            .child(Scrollbar::new("page-scrollbar", self.scroll.clone()))
     }
-}
 
-impl PageEditor {
     fn render_row(
         &mut self,
         index: usize,
@@ -142,6 +162,8 @@ impl PageEditor {
     ) -> AnyElement {
         let theme = Theme::current(window, cx);
         let header_rows = self.header_rows();
+        // The list is being laid out, so it cannot be asked: count the rows from the blocks.
+        let is_last_row = index + 1 == header_rows + self.rows.count();
         let mut gap = None;
         let row = if index < header_rows {
             // A press in the header is the header's own (the title takes focus from it): it must not
@@ -153,8 +175,9 @@ impl PageEditor {
                     .into_any_element()
             })
         } else {
-            let block = self.render_block(index - header_rows, &theme, window, cx);
-            Some(match self.row_motion(index - header_rows, window, cx) {
+            let block_index = self.rows.span(index - header_rows).start;
+            let block = self.render_block(block_index, &theme, window, cx);
+            Some(match self.row_motion(block_index, window, cx) {
                 Some(motion) => {
                     gap = motion.gap;
                     div()
@@ -169,9 +192,7 @@ impl PageEditor {
             .w_full()
             .flex()
             .justify_center()
-            .when(index + 1 == header_rows + self.blocks.len(), |column| {
-                column.pb(END_OF_PAGE_SPACE)
-            })
+            .when(is_last_row, |column| column.pb(END_OF_PAGE_SPACE))
             .child(
                 div()
                     .w_full()
@@ -199,7 +220,9 @@ impl PageEditor {
         let drop_line = self.drop_indicator_for(id);
         let group = row_group(index);
 
-        let body = if block.info.kind == BlockKind::Divider {
+        let body = if block.info.kind == BlockKind::Table {
+            self.render_table(index, theme, window, cx)
+        } else if block.info.kind == BlockKind::Divider {
             div()
                 .flex_1()
                 .py(theme.spacing.lg)
@@ -250,7 +273,11 @@ impl PageEditor {
                             .rounded(theme.radius.lg)
                             .bg(theme.colors.callout_background)
                     })
-                    .when(is_block_selected, |row| row.bg(theme.colors.text_selection))
+                    // A selected table tints its own grid, not the room beside it for its bars.
+                    .when(
+                        is_block_selected && block.info.kind != BlockKind::Table,
+                        |row| row.bg(theme.colors.text_selection),
+                    )
                     .children(self.render_marker(index, theme, window, cx))
                     .child(body),
             )
@@ -327,10 +354,8 @@ impl PageEditor {
             return;
         }
         self.page_width = width;
-        let top = self.list_state.logical_scroll_top();
-        let rows = self.list_state.item_count();
-        self.list_state.splice(0..rows, rows);
-        self.list_state.scroll_to(top);
+        let rows = self.scroll.row_count();
+        self.scroll.splice(0..rows, rows);
         cx.notify();
     }
 
@@ -338,7 +363,8 @@ impl PageEditor {
     /// has moved since the pointer last did (after Enter, say, the pointer still rests on the
     /// block above). `None` leaves the handle to pointer hover.
     pub(super) fn block_with_handle_at_caret(&self) -> Option<BlockId> {
-        self.is_handle_at_caret.then_some(self.selection.block)
+        self.is_handle_at_caret
+            .then(|| self.whole_block(self.selection.block))
     }
 
     /// The handle shown left of a block on hover, or on the caret's block while typing;
@@ -390,42 +416,6 @@ impl PageEditor {
                 cx.new(|_| DragPreview::new(dragged.label.clone()).icon(IconName::Grip))
             })
     }
-
-    /// Scrolls so the caret's line is inside the viewport. Uses the caret block's layout from
-    /// the previous frame; a block that was not on screen is first scrolled to the top, and
-    /// the next frame fine-tunes once it has a layout.
-    fn reveal_caret_if_needed(&mut self, window: &mut Window) {
-        if !std::mem::take(&mut self.needs_caret_revealed) {
-            return;
-        }
-        let Some(index) = self.block_index(self.selection.block) else {
-            return;
-        };
-        let caret_block = &self.blocks[index];
-        let current_layout = caret_block
-            .layout
-            .as_ref()
-            .filter(|_| caret_block.layout_frame + 1 == self.frame);
-        let (Some(viewport), Some(layout)) = (self.viewport, current_layout) else {
-            self.list_state.scroll_to(gpui::ListOffset {
-                item_ix: index + self.header_rows(),
-                offset_in_item: gpui::px(0.0),
-            });
-            self.needs_caret_revealed = true;
-            window.request_animation_frame();
-            return;
-        };
-        let caret_top = layout.caret_origin(self.display_selection().head).y;
-        let caret_bottom = caret_top + layout.line_height();
-        let margin = layout.line_height() * 2.0;
-        if caret_top < viewport.top() + margin {
-            self.list_state
-                .scroll_by(caret_top - viewport.top() - margin);
-        } else if caret_bottom > viewport.bottom() - margin {
-            self.list_state
-                .scroll_by(caret_bottom - viewport.bottom() + margin);
-        }
-    }
 }
 
 /// Wraps an action handler so it runs only while the editor itself has focus. Views rendered
@@ -476,7 +466,9 @@ pub(super) fn top_spacing(kind: BlockKind, theme: &Theme) -> gpui::Pixels {
         BlockKind::Heading1 => theme.spacing.xxl,
         BlockKind::Heading2 => theme.spacing.xl,
         BlockKind::Heading3 => theme.spacing.lg,
-        BlockKind::Code | BlockKind::Callout | BlockKind::Quote => theme.spacing.sm,
+        BlockKind::Code | BlockKind::Callout | BlockKind::Quote | BlockKind::Table => {
+            theme.spacing.sm
+        }
         _ => theme.spacing.xxs,
     }
 }

@@ -13,7 +13,7 @@ use scroll_ui::{DropIndicator, Theme, Transition};
 use super::render::top_spacing;
 use super::structure::{DropPoint, drop_placement, is_within};
 use super::{NEST_INDENT, PageEditor};
-use crate::editor::document::{BlockId, Placement};
+use crate::editor::document::{BlockId, BlockKind, Placement};
 
 /// The tallest gap opened for a drag, in body lines, so a long selection does not push the
 /// rest of the page out of view.
@@ -76,6 +76,7 @@ impl PageEditor {
             .next()
             .unwrap_or_default();
         let label = match blocks.len() {
+            1 if self.blocks[index].info.kind == BlockKind::Table => "Table".to_string(),
             1 if first_text.is_empty() => "Empty block".to_string(),
             1 => first_text.chars().take(48).collect(),
             count => format!("{count} blocks"),
@@ -127,11 +128,14 @@ impl PageEditor {
         {
             return None;
         }
+        // A table's cells are not rows to drop beside: over a table, the drop lands after it.
         let (index, bounds) = self
             .blocks
             .iter()
             .enumerate()
-            .filter(|(_, state)| state.layout_frame == self.frame)
+            .filter(|(index, state)| {
+                state.layout_frame == self.frame && self.table_index_of(*index).is_none()
+            })
             .filter_map(|(index, state)| Some((index, state.layout.as_ref()?.bounds())))
             .find(|(_, bounds)| position.y <= bounds.bottom())?;
         let info = self.blocks[index].info;

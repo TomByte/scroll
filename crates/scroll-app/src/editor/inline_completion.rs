@@ -102,6 +102,10 @@ impl PageEditor {
         let Some(kind) = CompletionKind::opened_by(typed) else {
             return false;
         };
+        // A table cell cannot be turned into another kind of block, so `/` is just text there.
+        if kind == CompletionKind::Block && self.is_in_table(self.selection.block) {
+            return false;
+        }
         let caret = self.selection.range.head;
         let is_word_start = text_before_caret[..caret - 1]
             .chars()
@@ -218,6 +222,7 @@ impl PageEditor {
                     self.convert_block(completion.block, kind, typed, cx)
                 }
                 SlashAction::MermaidDiagram => self.convert_to_diagram(completion.block, typed, cx),
+                SlashAction::Table => self.convert_to_table(completion.block, typed, cx),
                 SlashAction::CreateDatabase => {
                     self.delete_range(typed, cx);
                     cx.emit(PageEditorEvent::CreateDatabase);

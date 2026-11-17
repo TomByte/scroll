@@ -74,7 +74,7 @@ pub use lists::empty_state::EmptyState;
 pub use lists::list_item::ListItem;
 pub use lists::section_header::SectionHeader;
 pub use lists::tree_item::{Disclosure, TreeItem};
-pub use motion::{Motion, MotionExt, MotionPreference, Transition};
+pub use motion::{Glide, Motion, MotionExt, MotionPreference, Transition};
 pub use overlays::dialog::Dialog;
 pub use overlays::error_bubble::ErrorBubble;
 pub use overlays::menu::{Menu, MenuItem};

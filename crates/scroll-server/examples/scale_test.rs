@@ -47,6 +47,7 @@ fn page(title: String, parent: Option<PageId>, row_of: Option<DatabaseId>) -> Pa
         position: Position::between(None, None).unwrap(),
         row_of,
         is_archived: false,
+        is_folder: false,
     }
 }
 

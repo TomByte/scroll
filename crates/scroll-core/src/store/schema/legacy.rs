@@ -2,8 +2,10 @@
 //! missing, so a migration decodes queued transactions and confirmed records with these old
 //! shapes once and writes them back in the current one. Only `View` changed; everything that
 //! holds a view is mirrored here, the rest is the current type. Those current types (`Page`,
-//! `Database`, `FieldChange` and the rest) must be copied here as frozen shapes before any of them
-//! next changes, or this migration will stop reading what it was written for.
+//! `Database`, `FieldChange` and the rest) must be copied here as frozen shapes before the
+//! encoding of any of them next changes, or this migration will stop reading what it was written
+//! for. (`Page` has since gained `is_folder` without a change to how it is encoded; see
+//! `record::page`.)
 
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};

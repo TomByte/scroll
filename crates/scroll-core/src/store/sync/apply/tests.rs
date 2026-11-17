@@ -25,6 +25,7 @@ fn new_page(parent: Option<PageId>) -> Page {
         position: Position::between(None, None).unwrap(),
         row_of: None,
         is_archived: false,
+        is_folder: false,
     }
 }
 

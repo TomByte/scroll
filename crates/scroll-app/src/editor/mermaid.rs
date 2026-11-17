@@ -37,6 +37,12 @@ static FONTS: LazyLock<Arc<usvg::fontdb::Database>> = LazyLock::new(|| {
     Arc::new(fonts)
 });
 
+/// Reads the system fonts now rather than as the first diagram is drawn. It takes long enough
+/// that a diagram scrolled to before it is done shows its placeholder first.
+pub fn load_fonts() {
+    LazyLock::force(&FONTS);
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DiagramError {
     #[error("Nothing to draw yet")]

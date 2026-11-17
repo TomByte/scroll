@@ -207,6 +207,7 @@ mod tests {
             position: Position::between(None, None).unwrap(),
             row_of,
             is_archived: false,
+            is_folder: false,
         };
         let host = page(None);
         let property = Property {

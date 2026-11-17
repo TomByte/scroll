@@ -752,3 +752,123 @@ mod page_switching {
         );
     }
 }
+
+mod folders {
+    use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext};
+    use scroll_core::id::PageId;
+
+    use super::open_app;
+    use crate::commands::Target;
+    use crate::page::commands::NEW_SUB_PAGE;
+    use crate::window::AppWindow;
+    use crate::workspace::Workspace;
+
+    fn current(app: &Entity<AppWindow>, cx: &mut VisualTestContext) -> Option<PageId> {
+        app.read_with(cx, |app, _| app.current_page())
+    }
+
+    fn is_expanded(app: &Entity<AppWindow>, page: PageId, cx: &mut VisualTestContext) -> bool {
+        app.read_with(cx, |app, cx| {
+            app.sidebar.read(cx).expanded().contains(&page)
+        })
+    }
+
+    /// Makes a folder at the top level from the palette, names it, and returns it.
+    fn make_folder(
+        name: &str,
+        workspace: &Entity<Workspace>,
+        cx: &mut VisualTestContext,
+    ) -> PageId {
+        cx.simulate_keystrokes("cmd-p");
+        cx.simulate_input("new folder");
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        // The sidebar is waiting for its name.
+        cx.simulate_input(name);
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, _| {
+            let tree = workspace.tree();
+            let folder = tree
+                .children(None)
+                .into_iter()
+                .find(|page| page.title == name)
+                .expect("the folder is at the top level under its name");
+            assert!(tree.is_folder(folder.id));
+            folder.id
+        })
+    }
+
+    #[gpui::test]
+    fn a_new_folder_is_named_in_the_sidebar_and_no_page_opens(cx: &mut TestAppContext) {
+        let (app, workspace, cx) = open_app(cx);
+        let open_before = current(&app, cx);
+        let folder = make_folder("Client work", &workspace, cx);
+        assert_eq!(current(&app, cx), open_before);
+        assert!(workspace.read_with(cx, |workspace, _| workspace.tree().is_live(folder)));
+        assert!(cx.debug_bounds("tree-row-Client work").is_some());
+    }
+
+    #[gpui::test]
+    fn a_page_made_in_a_folder_opens_under_it_and_the_folder_only_opens_and_closes(
+        cx: &mut TestAppContext,
+    ) {
+        let (app, workspace, cx) = open_app(cx);
+        let folder = make_folder("Client work", &workspace, cx);
+        app.update_in(cx, |app, window, cx| {
+            let target = Target {
+                page: Some(folder),
+                ..Target::default()
+            };
+            app.run_command(NEW_SUB_PAGE, target, window, cx)
+        });
+        cx.run_until_parked();
+        let page = current(&app, cx).expect("the new page is open");
+        let parent = workspace.read_with(cx, |workspace, _| {
+            workspace.tree().page(page).unwrap().parent
+        });
+        assert_eq!(parent, Some(folder));
+        assert!(
+            is_expanded(&app, folder, cx),
+            "the folder opened to show it"
+        );
+
+        // The folder is the page's first breadcrumb; neither it nor its row opens a page.
+        let crumb = cx.debug_bounds("crumb-0").expect("the folder's crumb");
+        cx.simulate_click(crumb.center(), Modifiers::none());
+        cx.run_until_parked();
+        assert_eq!(current(&app, cx), Some(page));
+
+        let row = cx
+            .debug_bounds("tree-row-Client work")
+            .expect("the folder's row");
+        cx.simulate_click(row.center(), Modifiers::none());
+        cx.run_until_parked();
+        assert!(!is_expanded(&app, folder, cx), "a click closes it");
+        assert_eq!(current(&app, cx), Some(page));
+        cx.simulate_click(row.center(), Modifiers::none());
+        cx.run_until_parked();
+        assert!(is_expanded(&app, folder, cx), "and another opens it");
+    }
+
+    #[gpui::test]
+    fn a_folder_reached_by_its_id_is_shown_in_the_sidebar_instead(cx: &mut TestAppContext) {
+        let (app, workspace, cx) = open_app(cx);
+        let open_before = current(&app, cx);
+        let folder = make_folder("Archive", &workspace, cx);
+
+        app.update_in(cx, |app, window, cx| app.open_page(folder, window, cx));
+        cx.run_until_parked();
+        assert_eq!(current(&app, cx), open_before);
+        assert!(is_expanded(&app, folder, cx));
+
+        // As when the id comes from somewhere that does not know it is a folder, such as a
+        // search result or a saved last page: its view finds out and the window backs out.
+        app.update_in(cx, |app, window, cx| {
+            app.history.visit(folder);
+            app.show_page(folder, window, cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(current(&app, cx), open_before);
+    }
+}

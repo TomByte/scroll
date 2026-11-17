@@ -381,6 +381,7 @@ mod encoding_tests {
                     position: Position::between(None, None).unwrap(),
                     row_of: Some(database),
                     is_archived: false,
+                    is_folder: false,
                 })),
                 Operation::Create(Record::Database(Database {
                     id: database,

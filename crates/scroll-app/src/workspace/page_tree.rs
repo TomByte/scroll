@@ -188,8 +188,18 @@ impl PageTree {
         chain
     }
 
+    /// The page to open when none is named: the first at the top level that is not a folder.
     pub fn first_live_page(&self) -> Option<PageId> {
-        self.children.get(&None)?.first().copied()
+        self.children
+            .get(&None)?
+            .iter()
+            .copied()
+            .find(|id| !self.is_folder(*id))
+    }
+
+    /// Whether `id` is a loaded folder: a place for pages in the tree, with no page of its own.
+    pub fn is_folder(&self, id: PageId) -> bool {
+        self.pages.get(&id).is_some_and(|page| page.is_folder)
     }
 
     /// Applies a transaction to the loaded pages, as the store will.
@@ -287,6 +297,24 @@ impl PageTree {
         parent: Option<PageId>,
         title: &str,
     ) -> Result<(PageId, Transaction), MoveError> {
+        Ok(creation_of(self.new_last_child(parent, title)?))
+    }
+
+    /// A new folder as the last child of `parent`, whose children must be loaded.
+    pub fn create_folder(
+        &self,
+        parent: Option<PageId>,
+        title: &str,
+    ) -> Result<(PageId, Transaction), MoveError> {
+        let folder = Page {
+            is_folder: true,
+            ..self.new_last_child(parent, title)?
+        };
+        Ok(creation_of(folder))
+    }
+
+    /// A page placed after `parent`'s last child, not yet created.
+    fn new_last_child(&self, parent: Option<PageId>, title: &str) -> Result<Page, MoveError> {
         let siblings = self
             .children
             .get(&parent)
@@ -295,7 +323,7 @@ impl PageTree {
             .last()
             .and_then(|id| self.pages.get(id))
             .map(|page| page.position.clone());
-        let page = Page {
+        Ok(Page {
             id: PageId::generate(),
             parent,
             title: title.to_string(),
@@ -303,12 +331,8 @@ impl PageTree {
             position: Position::between(last.as_ref(), None)?,
             row_of: None,
             is_archived: false,
-        };
-        let id = page.id;
-        Ok((
-            id,
-            Transaction::new(vec![Operation::Create(Record::Page(page))]),
-        ))
+            is_folder: false,
+        })
     }
 
     /// `None` removes the icon.
@@ -402,6 +426,15 @@ fn set_field(id: PageId, field: PageField) -> Transaction {
     Transaction::new(vec![Operation::Set(FieldChange::Page { id, field })])
 }
 
+/// The page's id and the transaction that creates it.
+fn creation_of(page: Page) -> (PageId, Transaction) {
+    let id = page.id;
+    (
+        id,
+        Transaction::new(vec![Operation::Create(Record::Page(page))]),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -446,6 +479,31 @@ mod tests {
                 ("A1".into(), 1),
                 ("A2".into(), 1),
                 ("B".into(), 0)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_folder_holds_pages_and_is_never_the_page_to_open_first() {
+        let mut tree = PageTree::default();
+        let (folder, create) = tree.create_folder(None, "Projects").unwrap();
+        tree.apply(&create);
+        assert!(tree.is_folder(folder));
+        assert_eq!(tree.first_live_page(), None, "only a folder so far");
+
+        let (inside, create) = tree.create_page(Some(folder), "Plan").unwrap();
+        tree.apply(&create);
+        let (page, create) = tree.create_page(None, "Home").unwrap();
+        tree.apply(&create);
+        assert!(!tree.is_folder(inside) && !tree.is_folder(page));
+        assert_eq!(tree.first_live_page(), Some(page));
+        let rows = tree.visible_rows(&HashSet::from([folder]));
+        assert_eq!(
+            titles(&tree, &rows),
+            [
+                ("Projects".into(), 0),
+                ("Plan".into(), 1),
+                ("Home".into(), 0)
             ]
         );
     }
@@ -536,6 +594,7 @@ mod lazy_tests {
                 position: position.clone(),
                 row_of: None,
                 is_archived: false,
+                is_folder: false,
             },
             0,
         )

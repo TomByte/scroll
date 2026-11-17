@@ -68,6 +68,7 @@ fn page(
         position,
         row_of,
         is_archived: false,
+        is_folder: false,
     }
 }
 

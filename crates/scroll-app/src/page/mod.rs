@@ -52,6 +52,8 @@ pub enum PageViewEvent {
     OpenPage(PageId),
     /// The page was deleted or never existed (an old link or setting).
     Missing,
+    /// What was opened is a folder, which has no page; the sidebar shows what is in it.
+    Folder,
     /// What the page's first screen shows has loaded; sent once.
     Ready,
 }
@@ -238,6 +240,14 @@ impl PageView {
         cx.notify();
     }
 
+    /// A folder reached by its id (a search result, say) rather than through the sidebar.
+    fn show_folder(&mut self, cx: &mut Context<Self>) {
+        self.body = Body::Failed("This is a folder; its pages are in the sidebar.".into());
+        cx.emit(PageViewEvent::Folder);
+        self.mark_ready(cx);
+        cx.notify();
+    }
+
     /// Called by the window as it puts the page on screen.
     pub fn arrive_on_screen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.is_on_screen = true;
@@ -300,6 +310,9 @@ impl PageView {
     fn show_kind(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.follow_title(window, cx);
         let records = self.workspace.read(cx).records();
+        if records.tree.is_folder(self.page) {
+            return self.show_folder(cx);
+        }
         let row_of = records.tree.page(self.page).and_then(|page| page.row_of);
         let hosted_database = records
             .database_hosted_by(self.page)

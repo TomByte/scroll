@@ -17,13 +17,13 @@ A fast, local-first document and database app for macOS, written in Rust with [G
   <img src="assets/demo/scroll-demo.gif" alt="Scroll in use: a team home page with to-dos and a callout, the command palette opening a page with a Mermaid diagram and highlighted Rust, a roadmap database whose status cell is changed from the keyboard, and the settings page switching between themes" width="880">
 </p>
 
-Scroll is a Notion-like workspace: pages made of blocks, databases with table views, and tags. It works on its own with a local file and no account. Connect it to a Scroll server and the same workspace becomes a team workspace with live co-editing.
+Scroll is a Notion-like workspace: pages made of blocks, folders to keep them in, databases with table views, and tags. It works on its own with a local file and no account. Connect it to a Scroll server and the same workspace becomes a team workspace with live co-editing.
 
 > **Status:** early development. The app, the server and live sync work; expect rough edges.
 
 ## Features
 
-- **Block editor**: headings, lists, to-dos, quotes, callouts, syntax-highlighted code and Mermaid diagrams, with rich text, Markdown shortcuts and slash commands.
+- **Block editor**: headings, lists, to-dos, quotes, callouts, tables, syntax-highlighted code and Mermaid diagrams, with rich text, Markdown shortcuts and slash commands, and an outline of each page's headings beside it.
 - **Databases**: table views with typed properties, filters and sorts, built to stay smooth at hundreds of thousands of rows.
 - **Local-first**: every workspace is one SQLite file on your machine. Edits apply instantly and work offline.
 - **Live collaboration**: page content is a CRDT ([Loro](https://loro.dev)), so two people can type in the same block and see each other's cursors.

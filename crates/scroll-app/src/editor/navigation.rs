@@ -13,8 +13,9 @@ use scroll_ui::text::{
     word_range_at,
 };
 
+use super::structure::has_text;
 use super::{BlockState, PageEditor, PageEditorEvent, Selection};
-use crate::editor::document::{BlockId, BlockKind};
+use crate::editor::document::{BlockId, BlockKind, Placement};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Direction {
@@ -68,10 +69,38 @@ impl PageEditor {
     /// The nearest block with text before or after `block` in document order.
     fn neighbour(&self, block: BlockId, direction: Direction) -> Option<&BlockState> {
         let index = self.block_index(block)?;
-        let has_text = |state: &&BlockState| state.info.kind != BlockKind::Divider;
+        let has_text = |state: &&BlockState| has_text(state.info.kind);
         match direction {
             Direction::Backward => self.blocks[..index].iter().rev().find(has_text),
             Direction::Forward => self.blocks[index + 1..].iter().find(has_text),
+        }
+    }
+
+    /// The block the caret goes to when it moves up or down out of its block. In a table that
+    /// is the cell above or below, and from the table's edge the nearest block outside it;
+    /// coming up into a table from below, the first cell of its last row.
+    fn vertical_neighbour(&self, direction: Direction) -> Option<&BlockState> {
+        let rows_down = match direction {
+            Direction::Backward => -1,
+            Direction::Forward => 1,
+        };
+        if let Some(cell) = self.cell_beside_caret(rows_down) {
+            return self.block_state(cell);
+        }
+        let has_text = |state: &&BlockState| has_text(state.info.kind);
+        let neighbour = match (self.caret_table_span(), direction) {
+            (Some(table), Direction::Backward) => {
+                self.blocks[..table.start].iter().rev().find(has_text)
+            }
+            (Some(table), Direction::Forward) => self.blocks[table.end..].iter().find(has_text),
+            (None, _) => self.neighbour(self.selection.block, direction),
+        }?;
+        let row_start = self
+            .first_cell_in_row_of(neighbour.info.id)
+            .filter(|_| direction == Direction::Backward);
+        match row_start {
+            Some(cell) => self.block_state(cell),
+            None => Some(neighbour),
         }
     }
 
@@ -129,7 +158,7 @@ impl PageEditor {
                 goal_x,
             });
         }
-        let Some(neighbour) = self.neighbour(block, direction) else {
+        let Some(neighbour) = self.vertical_neighbour(direction) else {
             let offset = match direction {
                 Direction::Backward => 0,
                 Direction::Forward => self.selected_text().len(),
@@ -328,11 +357,7 @@ impl PageEditor {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(first) = self
-            .blocks
-            .iter()
-            .find(|state| state.info.kind != BlockKind::Divider)
-        {
+        if let Some(first) = self.blocks.iter().find(|state| has_text(state.info.kind)) {
             let block = first.info.id;
             self.move_caret(block, 0, cx);
         }
@@ -343,7 +368,7 @@ impl PageEditor {
             .blocks
             .iter()
             .rev()
-            .find(|state| state.info.kind != BlockKind::Divider)
+            .find(|state| has_text(state.info.kind))
         {
             let (block, offset) = (last.info.id, last.content.text.len());
             self.move_caret(block, offset, cx);
@@ -509,7 +534,9 @@ impl PageEditor {
         }
     }
 
-    /// A click in the empty space below the last block puts the caret at its end.
+    /// A click in the empty space below the last block puts the caret at its end. Under a
+    /// page that ends in a table or a divider, which have no line to write on after them, it
+    /// starts a new paragraph instead.
     pub(super) fn mouse_down_below_blocks(
         &mut self,
         _: &MouseDownEvent,
@@ -517,11 +544,22 @@ impl PageEditor {
         cx: &mut Context<Self>,
     ) {
         window.focus(&self.focus_handle);
+        let Some(last) = self.blocks.last() else {
+            return;
+        };
+        let ends_in_a_line = has_text(last.info.kind) && !self.is_in_table(last.info.id);
+        if !ends_in_a_line && !self.is_read_only() {
+            return self.apply_edit(cx, |page| {
+                let below = Placement::LastChildOf(None);
+                let paragraph = page.insert_block(below, BlockKind::Paragraph)?;
+                Ok(Selection::caret(paragraph, 0))
+            });
+        }
         if let Some(last) = self
             .blocks
             .iter()
             .rev()
-            .find(|state| state.info.kind != BlockKind::Divider)
+            .find(|state| has_text(state.info.kind))
         {
             let (block, offset) = (last.info.id, last.content.text.len());
             self.move_caret(block, offset, cx);
@@ -544,9 +582,14 @@ impl PageEditor {
             return;
         }
         let origin = self.selection.block;
-        let over = self.block_at_height(event.position.y).unwrap_or(origin);
-        if over != origin {
-            return self.select_block_range(origin, over, cx);
+        // Inside a table the pointer selects text in the cell it started in; it selects
+        // whole blocks only once it leaves the table.
+        let origin_whole = self.whole_block(origin);
+        let over = self
+            .block_at_height(event.position.y)
+            .unwrap_or(origin_whole);
+        if over != origin_whole {
+            return self.select_block_range(origin_whole, over, cx);
         }
         let Some(layout) = self
             .block_state(origin)
@@ -562,7 +605,7 @@ impl PageEditor {
 
     /// The block whose row is at window height `y`, judged by the blocks laid out in the last
     /// frame (only those on screen are): the last one starting above `y`, so the gap between two
-    /// blocks, and a divider, count as the block above.
+    /// blocks, and a divider, count as the block above. Anywhere in a table is the table.
     fn block_at_height(&self, y: Pixels) -> Option<BlockId> {
         self.blocks
             .iter()
@@ -570,7 +613,7 @@ impl PageEditor {
             .filter_map(|state| Some((state.info.id, state.layout.as_ref()?.bounds().top())))
             .take_while(|(_, top)| *top <= y)
             .last()
-            .map(|(block, _)| block)
+            .map(|(block, _)| self.whole_block(block))
     }
 
     pub(super) fn mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {

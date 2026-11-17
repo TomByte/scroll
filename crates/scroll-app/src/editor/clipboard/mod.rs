@@ -72,7 +72,8 @@ impl PageEditor {
     }
 
     /// Pastes what this app copied as blocks, or text from elsewhere read as Markdown. In a
-    /// code block everything is pasted as literal text.
+    /// code block everything is pasted as literal text, and so are several blocks pasted into
+    /// a table cell, which cannot hold blocks. A table pasted on a line with text goes below it.
     pub(super) fn paste(&mut self, _: &Paste, _: &mut Window, cx: &mut Context<Self>) {
         let Some(item) = cx.read_from_clipboard() else {
             return;
@@ -89,10 +90,24 @@ impl PageEditor {
         if self.kind_of(block) == BlockKind::Code {
             return self.type_text(range, &text.replace("\r\n", "\n"), cx);
         }
-        let copied = copied_here.unwrap_or_else(|| format::from_markdown(&text));
-        let is_current_empty = self
-            .content(block)
-            .is_none_or(|content| content.text.is_empty());
+        let mut copied = copied_here.unwrap_or_else(|| format::from_markdown(&text));
+        if self.is_in_table(block) && !copied.is_fragment {
+            return self.type_text(range, &text.replace("\r\n", "\n"), cx);
+        }
+        let length = self.content(block).map_or(0, |content| content.text.len());
+        let is_current_empty = length == 0;
+        let starts_with_table = copied
+            .blocks
+            .first()
+            .is_some_and(|first| first.kind == format::CopiedKind::Table);
+        let range = if starts_with_table && !is_current_empty {
+            // The line keeps its text, and the table starts in a block of its own after it.
+            let paragraph = format::CopiedBlock::empty(format::CopiedKind::Paragraph, 0);
+            copied.blocks.insert(0, paragraph);
+            length..length
+        } else {
+            range
+        };
         self.apply_edit(cx, move |page| {
             paste_blocks(page, block, range.clone(), &copied, is_current_empty)
         });

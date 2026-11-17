@@ -17,6 +17,7 @@ use scroll_ui::text::{
 use super::inline_completion::CompletionKind;
 use super::markdown::{block_shortcut, inline_shortcut};
 use super::rich_text::{MarkKind, Marks};
+use super::structure::has_text;
 use super::{Indent, InsertLineBreak, Outdent, PageEditor, PageEditorEvent, Selection, ToggleToDo};
 use crate::editor::document::{
     BlockId, BlockKind, PageDocument, PageResult, Placement, StableCursor,
@@ -118,10 +119,15 @@ impl PageEditor {
     }
 
     /// Where the caret goes when its block was deleted by someone else: the end of the
-    /// block that now sits closest to where it was.
+    /// block with text that now sits closest to where it was, looking down the page first.
     fn fallback_selection(&self, block_index: usize) -> Selection {
         let index = block_index.min(self.blocks.len().saturating_sub(1));
-        match self.blocks.get(index) {
+        let (above, from_here) = self.blocks.split_at(index);
+        let nearest = from_here
+            .iter()
+            .chain(above.iter().rev())
+            .find(|block| has_text(block.info.kind));
+        match nearest {
             Some(block) => Selection::caret(block.info.id, block.content.text.len()),
             None => self.selection,
         }
@@ -198,7 +204,8 @@ impl PageEditor {
     }
 
     /// Turns `block` into `kind`, removing `markup` (the shortcut or slash command typed).
-    /// A divider has no text, so the caret moves to a new paragraph after it.
+    /// A divider has no text, so the caret moves to a new paragraph after it. A table and its
+    /// parts stay what they are: what is typed in a cell is its text.
     pub(super) fn convert_block(
         &mut self,
         block: BlockId,
@@ -207,6 +214,9 @@ impl PageEditor {
         cx: &mut Context<Self>,
     ) {
         self.completion = None;
+        if self.kind_of(block).is_table_structure() {
+            return;
+        }
         self.apply_edit(cx, |page| {
             page.delete_text(block, markup.clone())?;
             page.set_kind(block, kind)?;
@@ -251,12 +261,15 @@ impl PageEditor {
     }
 
     /// A styled block first becomes a paragraph, a nested paragraph moves out a level, and
-    /// only then does the block join the one before it.
+    /// only then does the block join the one before it. A table cell stays as it is.
     fn backspace_at_block_start(&mut self, cx: &mut Context<Self>) {
         let block = self.selection.block;
         let Some(state) = self.block_state(block) else {
             return;
         };
+        if self.is_in_table(block) {
+            return;
+        }
         let info = state.info;
         if info.kind != BlockKind::Paragraph {
             return self.apply_edit(cx, |page| {
@@ -287,6 +300,10 @@ impl PageEditor {
                 page.delete_block(previous.id)?;
                 Ok(Selection::caret(block, 0))
             });
+        }
+        // A table above is selected rather than joined; Backspace again deletes it.
+        if previous.kind.is_table_structure() {
+            return self.select_block_range(previous.id, previous.id, cx);
         }
         self.apply_edit(cx, |page| {
             let merged = page.merge_into_previous(block)?;
@@ -322,6 +339,10 @@ impl PageEditor {
         else {
             return;
         };
+        // Text neither leaves a table cell nor takes in a table.
+        if next.kind.is_table_structure() {
+            return;
+        }
         let selection = self.selection;
         self.apply_edit(cx, |page| {
             if next.kind == BlockKind::Divider {
@@ -376,14 +397,18 @@ impl PageEditor {
         self.delete_forward_to(next_word_end, cx);
     }
 
-    /// Enter: confirms the slash menu, edits a selected block, adds a line in code, turns an
-    /// empty list item back into a paragraph, or splits the block.
+    /// Enter: confirms the slash menu, edits a selected block, goes down a row in a table,
+    /// adds a line in code, turns an empty list item back into a paragraph, or splits the
+    /// block.
     pub(super) fn newline(&mut self, _: &Newline, _: &mut Window, cx: &mut Context<Self>) {
         if self.choose_highlighted_completion(cx) {
             return;
         }
         if self.block_selection.is_some() {
             return self.edit_selected_block(cx);
+        }
+        if self.move_to_cell_below(cx) {
+            return;
         }
         let block = self.selection.block;
         let kind = self.kind_of(block);
@@ -434,12 +459,15 @@ impl PageEditor {
         self.type_text(self.selection.range.range(), "\n", cx);
     }
 
-    /// Tab: indents in code, otherwise nests the block (or selected blocks) under the
-    /// sibling before it.
+    /// Tab: indents in code, goes to the next cell in a table, otherwise nests the block (or
+    /// selected blocks) under the sibling before it.
     pub(super) fn indent(&mut self, _: &Indent, _: &mut Window, cx: &mut Context<Self>) {
         if self.completion_kind() == Some(CompletionKind::Emoji)
             && self.choose_highlighted_completion(cx)
         {
+            return;
+        }
+        if self.block_selection.is_none() && self.move_to_next_cell(cx) {
             return;
         }
         let block = self.selection.block;
@@ -454,6 +482,10 @@ impl PageEditor {
         let Some(new_parent) = super::structure::previous_sibling(&infos, first) else {
             return;
         };
+        // Only a table's own rows and cells go inside it.
+        if self.kind_of(new_parent).is_table_structure() {
+            return;
+        }
         let selection = self.selection;
         let block_selection = self.block_selection;
         self.apply_edit(cx, |page| {
@@ -465,8 +497,12 @@ impl PageEditor {
         self.block_selection = block_selection;
     }
 
-    /// Shift+Tab: moves the block (or selected blocks) out one level, after its parent.
+    /// Shift+Tab: goes to the cell before in a table, otherwise moves the block (or selected
+    /// blocks) out one level, after its parent.
     pub(super) fn outdent(&mut self, _: &Outdent, _: &mut Window, cx: &mut Context<Self>) {
+        if self.block_selection.is_none() && self.move_to_previous_cell(cx) {
+            return;
+        }
         let blocks = self.target_blocks();
         let infos = self.block_infos();
         let Some(parent) = blocks
@@ -499,6 +535,7 @@ impl PageEditor {
         let blocks: Vec<BlockId> = match self.selected_block_range() {
             Some(range) => self.blocks[range]
                 .iter()
+                .filter(|block| !block.info.kind.is_table_structure())
                 .map(|block| block.info.id)
                 .collect(),
             None => vec![self.selection.block],

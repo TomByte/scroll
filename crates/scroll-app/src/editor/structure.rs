@@ -1,10 +1,19 @@
-//! Questions about the block tree that need no window: list numbering, which blocks a
-//! selection really covers, where a drag would drop, and which list rows changed.
+//! Questions about the block tree that need no window: which blocks hold text, list numbering,
+//! which blocks a selection really covers, where a drag would drop, and which list rows changed.
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use crate::editor::document::{BlockId, BlockInfo, BlockKind, Placement};
+
+/// Whether a block of `kind` shows text the caret can be in. A divider, a table and a table's
+/// rows do not: the caret passes over them.
+pub fn has_text(kind: BlockKind) -> bool {
+    !matches!(
+        kind,
+        BlockKind::Divider | BlockKind::Table | BlockKind::TableRow
+    )
+}
 
 /// The number shown before each numbered list item: a run of numbered siblings counts up
 /// from 1, restarting after any other kind of block.
@@ -131,6 +140,14 @@ mod tests {
         page.commit();
         let blocks = page.blocks().to_vec();
         (page, blocks)
+    }
+
+    #[test]
+    fn only_blocks_that_show_text_take_the_caret() {
+        assert!(has_text(BlockKind::Paragraph) && has_text(BlockKind::TableCell));
+        for kind in [BlockKind::Divider, BlockKind::Table, BlockKind::TableRow] {
+            assert!(!has_text(kind), "{kind:?}");
+        }
     }
 
     #[test]

@@ -136,7 +136,12 @@ impl AppWindow {
             PageViewEvent::OpenPage(page) => self.open_page(*page, window, cx),
             PageViewEvent::Missing => {
                 let missing = view.read(cx).page();
-                self.leave_missing_page(missing, window, cx);
+                self.leave_unopenable_page(missing, window, cx);
+            }
+            PageViewEvent::Folder => {
+                let folder = view.read(cx).page();
+                self.leave_unopenable_page(folder, window, cx);
+                self.reveal_folder(folder, cx);
             }
             PageViewEvent::Ready => {
                 let is_incoming = self

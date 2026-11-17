@@ -9,7 +9,9 @@ use scroll_core::store::PageCatchUp;
 use scroll_core::sync::{SequencedTransaction, WorkspaceSnapshot};
 use scroll_core::validation::ValidationError;
 
-pub const PROTOCOL_VERSION: u16 = 2;
+/// Raised whenever a message, or a record inside one, gains something an older build cannot
+/// read. 3: a page can be a folder.
+pub const PROTOCOL_VERSION: u16 = 3;
 
 /// Assigned by the server to each connection, so two devices of one user on the same page have separate presence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

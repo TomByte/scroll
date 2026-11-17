@@ -25,13 +25,17 @@ mod input_handler;
 pub mod markdown;
 mod mermaid;
 mod navigation;
+pub mod outline;
 mod render;
 #[cfg(test)]
 mod replica_tests;
 pub mod rich_text;
+mod rows;
+pub mod scrolling;
 pub mod slash_commands;
 pub mod structure;
 mod syntax;
+mod table;
 #[cfg(test)]
 mod tests;
 mod visual_lines;
@@ -42,15 +46,17 @@ use std::time::Duration;
 
 use gpui::{
     AnyView, App, AppContext, Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    ListAlignment, ListState, Pixels, Point, SharedString, Subscription, Task, Window, actions,
+    Pixels, Point, SharedString, Subscription, Task, Window, actions,
 };
 use scroll_settings::Settings;
-use scroll_ui::{PopupHost, TextSelection};
+use scroll_ui::{Glide, PopupHost, TextSelection};
 
 use crate::editor::document::{BlockId, BlockInfo, BlockKind, PageDocument, StableCursor};
 use crate::page_layout::{PAGE_WIDTH, PageWidth};
 use block_layout::BlockLayout;
 use rich_text::{Marks, RichText};
+use rows::Rows;
+use scrolling::{PageScroll, REVEAL_ATTEMPTS};
 
 /// The key context the editor binds its keys in; commands scoped to the editor use it too.
 pub const KEY_CONTEXT: &str = "PageEditor";
@@ -166,7 +172,12 @@ pub struct PageEditor {
     blocks: Vec<BlockState>,
     positions: std::collections::HashMap<BlockId, usize>,
     list_numbers: Vec<Option<usize>>,
-    list_state: ListState,
+    /// Which blocks each row of the list shows.
+    rows: Rows,
+    scroll: PageScroll,
+    /// A mouse wheel's steps still being scrolled, while smooth scrolling is on.
+    glide: Glide,
+    outline_scroll: outline::OutlineScroll,
     /// Rendered above the first block and scrolled with the page, e.g. the page title.
     header: Option<AnyView>,
     selection: Selection,
@@ -177,8 +188,10 @@ pub struct PageEditor {
     /// Horizontal position kept while moving up and down through lines of different length.
     goal_x: Option<Pixels>,
     is_dragging: bool,
-    /// Set when the caret moved, so the next render scrolls it into view.
-    needs_caret_revealed: bool,
+    /// How many more frames the caret is brought into view for; set when it moves.
+    reveal_attempts: u8,
+    /// Where the page was scrolled to when its blocks were last laid out.
+    place_at_layout: Option<scrolling::ScrollPlace>,
     viewport: Option<Bounds<Pixels>>,
     /// Counts render passes, to tell current block layouts from stale ones.
     frame: u64,
@@ -235,7 +248,7 @@ impl PageEditor {
             })
             .collect();
         let infos: Vec<BlockInfo> = blocks.iter().map(|block| block.info).collect();
-        let list_state = ListState::new(blocks.len(), ListAlignment::Top, LIST_OVERDRAW);
+        let rows = Rows::of(&infos);
         let positions = infos
             .iter()
             .enumerate()
@@ -244,7 +257,10 @@ impl PageEditor {
         PageEditor {
             positions,
             list_numbers: structure::list_numbers(&infos),
-            list_state,
+            scroll: PageScroll::new(rows.count()),
+            rows,
+            glide: Glide::default(),
+            outline_scroll: outline::OutlineScroll::default(),
             header: None,
             selection,
             page,
@@ -254,7 +270,8 @@ impl PageEditor {
             pending_marks: None,
             goal_x: None,
             is_dragging: false,
-            needs_caret_revealed: false,
+            reveal_attempts: 0,
+            place_at_layout: None,
             viewport: None,
             frame: 0,
             collaborators: std::collections::BTreeMap::new(),
@@ -280,7 +297,7 @@ impl PageEditor {
     /// Shows `header` above the first block, scrolling with the page.
     pub fn set_header(&mut self, header: AnyView, cx: &mut Context<Self>) {
         if self.header.is_none() {
-            self.list_state.splice(0..0, 1);
+            self.scroll.splice(0..0, 1);
         }
         self.header = Some(header);
         cx.notify();
@@ -290,18 +307,12 @@ impl PageEditor {
         &self.focus_handle
     }
 
-    /// Scrolls the page by `distance` (positive scrolls down).
-    pub fn scroll_by(&mut self, distance: Pixels, cx: &mut Context<Self>) {
-        self.list_state.scroll_by(distance);
-        cx.notify();
-    }
-
     /// Puts the caret at the start of the first block and focuses the editor.
     pub fn focus_start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(first) = self
             .blocks
             .iter()
-            .find(|block| block.info.kind != BlockKind::Divider)
+            .find(|block| structure::has_text(block.info.kind))
         {
             self.selection = Selection::caret(first.info.id, 0);
         }
@@ -387,10 +398,10 @@ impl PageEditor {
 
     /// Re-reads the blocks Loro reported as changed and tells the list which rows to measure
     /// again. The block list itself is rebuilt only when blocks were added, removed, moved or
-    /// changed kind.
+    /// changed kind (a block's kind decides which rows there are: a table is one row).
     fn refresh_blocks(&mut self) {
         let changes = self.page.take_changes();
-        if changes.is_structure_changed {
+        if changes.is_structure_changed || self.is_kind_changed(&changes.blocks) {
             self.rebuild_block_list(&changes.blocks);
         } else {
             self.refresh_changed_blocks(&changes.blocks);
@@ -405,10 +416,22 @@ impl PageEditor {
         }
     }
 
-    /// Re-reads blocks whose text, kind or to-do state changed, without touching the rest.
+    /// Whether any of `changed` (blocks in the list as it stands) is stored with another kind.
+    fn is_kind_changed(&self, changed: &std::collections::HashSet<BlockId>) -> bool {
+        let stored = self.page.blocks();
+        changed
+            .iter()
+            .filter_map(|block| self.block_index(*block))
+            .any(|index| {
+                stored
+                    .get(index)
+                    .is_some_and(|info| info.kind != self.blocks[index].info.kind)
+            })
+    }
+
+    /// Re-reads blocks whose text or to-do state changed, without touching the rest.
     fn refresh_changed_blocks(&mut self, changed: &std::collections::HashSet<BlockId>) {
-        let header = self.header_rows();
-        let mut is_kind_changed = false;
+        let mut stale_rows = std::collections::BTreeSet::new();
         for block in changed {
             let Some(&index) = self.positions.get(block) else {
                 continue;
@@ -416,21 +439,19 @@ impl PageEditor {
             let (info, content) = read_block(&self.page, *block);
             let state = &mut self.blocks[index];
             if let Some(info) = info {
-                is_kind_changed |= state.info.kind != info.kind;
                 state.info = info;
             }
             state.content = content;
-            self.list_state
-                .splice(header + index..header + index + 1, 1);
+            stale_rows.insert(self.list_row(index));
         }
-        if is_kind_changed {
-            self.list_numbers = structure::list_numbers(&self.block_infos());
+        for row in stale_rows {
+            self.scroll.splice(row..row + 1, 1);
         }
     }
 
     fn rebuild_block_list(&mut self, changed_text: &std::collections::HashSet<BlockId>) {
         let infos = self.page.blocks();
-        let old_rows: Vec<BlockInfo> = self.blocks.iter().map(|block| block.info).collect();
+        let old_infos = self.block_infos();
         let mut previous: std::collections::HashMap<BlockId, BlockState> =
             std::mem::take(&mut self.blocks)
                 .into_iter()
@@ -451,20 +472,26 @@ impl PageEditor {
                 },
             })
             .collect();
-        let (changed, count) = structure::changed_span(&old_rows, &infos);
+        let rows = Rows::of(&infos);
+        let (changed, count) =
+            structure::changed_span(&self.rows.contents(&old_infos), &rows.contents(&infos));
         let header = self.header_rows();
-        self.list_state
+        self.scroll
             .splice(header + changed.start..header + changed.end, count);
-        for (index, state) in self.blocks.iter().enumerate() {
-            if changed_text.contains(&state.info.id)
-                && !(changed.start..changed.start + count).contains(&index)
-            {
-                self.list_state
-                    .splice(header + index..header + index + 1, 1);
-            }
+        self.rows = rows;
+        self.reindex_blocks();
+        // Rows that stayed in place but show a block whose text changed.
+        let replaced = header + changed.start..header + changed.start + count;
+        let stale_rows: std::collections::BTreeSet<usize> = changed_text
+            .iter()
+            .filter_map(|block| self.block_index(*block))
+            .map(|index| self.list_row(index))
+            .filter(|row| !replaced.contains(row))
+            .collect();
+        for row in stale_rows {
+            self.scroll.splice(row..row + 1, 1);
         }
         self.list_numbers = structure::list_numbers(&infos);
-        self.reindex_blocks();
     }
 
     pub(crate) fn record_layout(&mut self, block: BlockId, layout: BlockLayout) {
@@ -482,6 +509,12 @@ impl PageEditor {
 
     fn block_index(&self, block: BlockId) -> Option<usize> {
         self.positions.get(&block).copied()
+    }
+
+    /// The blocks shown in the same row of the list as the block at `index`: the block alone,
+    /// or for a table or a part of one, the whole table.
+    fn row_span(&self, index: usize) -> Range<usize> {
+        self.rows.span(self.rows.row_of(index))
     }
 
     fn block_state(&self, block: BlockId) -> Option<&BlockState> {
@@ -553,7 +586,7 @@ impl PageEditor {
 
     fn restart_caret_blink(&mut self, cx: &mut Context<Self>) {
         self.is_caret_visible = true;
-        self.needs_caret_revealed = true;
+        self.reveal_attempts = REVEAL_ATTEMPTS;
         self.is_handle_at_caret = true;
         self._blink_task = cx.spawn(async move |editor, cx| {
             loop {
@@ -580,10 +613,6 @@ impl PageEditor {
             .unwrap_or_default()
     }
 }
-
-/// How far beyond the visible area the virtual list lays out blocks, so fast scrolling does
-/// not show gaps.
-const LIST_OVERDRAW: Pixels = gpui::px(600.0);
 
 /// The block's kind and text as stored now; `None` for the kind if it could not be read.
 fn read_block(page: &PageDocument, block: BlockId) -> (Option<BlockInfo>, RichText) {

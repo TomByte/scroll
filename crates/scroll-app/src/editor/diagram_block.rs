@@ -262,11 +262,22 @@ impl PageEditor {
     }
 
     /// Starts drawing the diagrams on the page's first screen before the page is drawn, so
-    /// they can be in place, at their size, in its first frame.
+    /// they can be in place, at their size, in its first frame. A diagram further down is drawn
+    /// as it nears the screen; the fonts it needs are read now, so that it is ready by the time
+    /// it is scrolled to.
     pub(crate) fn draw_first_screen_diagrams(&self, theme: &Theme, cx: &mut Context<Self>) {
         let style = DiagramStyle::from_theme(theme);
         for block in self.first_screen_diagrams() {
             self.request_diagram(block, style, cx);
+        }
+        let has_diagram = self
+            .blocks
+            .iter()
+            .any(|block| self.is_diagram(block.info.id));
+        if has_diagram {
+            cx.background_executor()
+                .spawn(async { mermaid::load_fonts() })
+                .detach();
         }
     }
 
@@ -296,8 +307,7 @@ impl PageEditor {
         }
         // The list keeps the heights of rows off screen; this one's may have changed.
         if let Some(index) = self.block_index(block) {
-            let row = self.header_rows() + index;
-            self.list_state.splice(row..row + 1, 1);
+            self.remeasure_row_of(index);
         }
         cx.notify();
     }

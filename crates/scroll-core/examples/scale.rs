@@ -195,6 +195,7 @@ fn measure_writes(store: &mut WorkspaceStore) -> Outcome {
         position: Position::between(last.as_ref(), None)?,
         row_of: Some(database.id),
         is_archived: false,
+        is_folder: false,
     };
     let add = Transaction::new(vec![Operation::Create(Record::Page(row))]);
     let (result, elapsed) = timed(|| store.apply_local_transaction(&add));

@@ -80,6 +80,7 @@ fn space_freed_by_deletes_is_reclaimed_in_short_steps() {
             position: Position::between(None, None).unwrap(),
             row_of: None,
             is_archived: false,
+            is_folder: false,
         })
         .collect();
     let creates = pages

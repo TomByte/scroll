@@ -167,6 +167,7 @@ impl Builder<'_> {
                 position,
                 row_of: None,
                 is_archived: self.random.with_probability(0.02),
+                is_folder: false,
             };
             let id = page.id;
             self.insert(&Record::Page(page))?;
@@ -209,6 +210,7 @@ impl Builder<'_> {
             position: host_position,
             row_of: None,
             is_archived: false,
+            is_folder: false,
         };
         let database = Database {
             id: DatabaseId::generate(),
@@ -232,6 +234,7 @@ impl Builder<'_> {
                 position,
                 row_of: Some(database.id),
                 is_archived: false,
+                is_folder: false,
             };
             let id = row.id;
             self.insert(&Record::Page(row))?;

@@ -19,6 +19,7 @@ fn model_with_row() -> (TableModel, PageId, Property) {
         position: Position::between(None, None).unwrap(),
         row_of: Some(model.database.id),
         is_archived: false,
+        is_folder: false,
     };
     let id = page.id;
     model.apply(&Transaction::new(vec![Operation::Create(Record::Page(
@@ -78,6 +79,7 @@ fn row(title: &str) -> TableRow {
             position: Position::between(None, None).unwrap(),
             row_of: None,
             is_archived: false,
+            is_folder: false,
         },
         values: Vec::new(),
     }

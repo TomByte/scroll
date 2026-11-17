@@ -1,6 +1,7 @@
 //! Colours for code blocks. The grammars load in the background the first time a page shows a
 //! code block with a language; until then, and for a language without a grammar, code is
-//! plain. A page being opened builds the grammars of its first screen before it is shown.
+//! plain. A page being opened builds the grammars of its first screen before it is shown, and
+//! those of the rest of the page behind it, so scrolling never waits for one.
 //!
 //! Highlighting is by line and kept per block. After an edit only the lines from the first
 //! changed one are parsed again, and only until the parser reaches an unchanged line in the
@@ -85,16 +86,14 @@ fn build_grammars(languages: Vec<CodeLanguage>, cx: &App) -> Task<()> {
 }
 
 impl PageEditor {
-    /// Builds the grammars the code blocks on the page's first screen need, in the background,
-    /// so its first frame shows them in colour without being held up.
-    pub(crate) fn build_first_screen_grammars(&mut self, cx: &mut Context<Self>) {
-        let mut languages: Vec<CodeLanguage> = Vec::new();
-        for block in self.blocks.iter().take(FIRST_SCREEN_BLOCKS) {
-            let language = self.code_language(block.info.id);
-            let has_grammar = !matches!(language, CodeLanguage::PlainText | CodeLanguage::Mermaid);
-            if block.info.kind == BlockKind::Code && has_grammar && !languages.contains(&language) {
-                languages.push(language);
-            }
+    /// Builds the grammars the page's code blocks need, in the background. Those of its first
+    /// screen come first and are waited for (`are_first_screen_grammars_built`), so its first
+    /// frame shows them in colour without being held up. The rest follow, so the frame that
+    /// first scrolls a language onto the screen does not have to build its grammar.
+    pub(crate) fn build_page_grammars(&mut self, cx: &mut Context<Self>) {
+        let (languages, later) = self.page_languages();
+        if !later.is_empty() {
+            build_grammars(later, cx).detach();
         }
         if languages.is_empty() {
             return;
@@ -116,6 +115,35 @@ impl PageEditor {
 
     pub(crate) fn are_first_screen_grammars_built(&self) -> bool {
         !self.code_highlights.is_building_grammars
+    }
+
+    /// The highlighted languages of the page's code blocks, each once: those on its first
+    /// screen, then those met only further down.
+    fn page_languages(&self) -> (Vec<CodeLanguage>, Vec<CodeLanguage>) {
+        let first_screen = self.blocks.len().min(FIRST_SCREEN_BLOCKS);
+        let first = self.languages_with_grammars(&self.blocks[..first_screen]);
+        let later = self
+            .languages_with_grammars(&self.blocks[first_screen..])
+            .into_iter()
+            .filter(|language| !first.contains(language))
+            .collect();
+        (first, later)
+    }
+
+    /// The languages of the code blocks among `blocks` that are highlighted, each once.
+    fn languages_with_grammars(&self, blocks: &[super::BlockState]) -> Vec<CodeLanguage> {
+        let mut languages: Vec<CodeLanguage> = Vec::new();
+        for block in blocks {
+            if block.info.kind != BlockKind::Code {
+                continue;
+            }
+            let language = self.code_language(block.info.id);
+            let has_grammar = !matches!(language, CodeLanguage::PlainText | CodeLanguage::Mermaid);
+            if has_grammar && !languages.contains(&language) {
+                languages.push(language);
+            }
+        }
+        languages
     }
 }
 
@@ -381,7 +409,7 @@ fn block_spans(lines: &[Line]) -> Rc<[HighlightSpan]> {
 pub(super) struct CodeHighlights {
     // Filled while painting, which only reads the editor.
     blocks: RefCell<HashMap<BlockId, Highlighted>>,
-    /// While the grammars the first screen needs are built (`build_first_screen_grammars`).
+    /// While the grammars the first screen needs are built (`build_page_grammars`).
     is_building_grammars: bool,
 }
 
@@ -501,6 +529,51 @@ mod tests {
             .iter()
             .map(|span| (&text[span.range.clone()], span.token))
             .collect()
+    }
+
+    #[gpui::test]
+    fn a_page_builds_the_grammars_of_its_first_screen_first_and_then_the_rest(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use crate::editor::document::{PageDocument, Placement};
+        use crate::editor::{PageEditor, Selection};
+
+        cx.update(|cx| {
+            scroll_ui::init(cx);
+            crate::editor::init(cx);
+        });
+        let page = PageDocument::create(1, &["start"]).unwrap();
+        let add_code = |language: CodeLanguage| {
+            let block = page
+                .insert_block(Placement::LastChildOf(None), BlockKind::Code)
+                .unwrap();
+            page.set_block_language(block, language.id()).unwrap();
+        };
+        add_code(CodeLanguage::Python);
+        add_code(CodeLanguage::Mermaid);
+        for _ in 0..FIRST_SCREEN_BLOCKS {
+            page.insert_block(Placement::LastChildOf(None), BlockKind::Paragraph)
+                .unwrap();
+        }
+        add_code(CodeLanguage::Rust);
+        add_code(CodeLanguage::Python);
+        add_code(CodeLanguage::PlainText);
+        let first = page.ensure_block().unwrap();
+        let (editor, cx) =
+            cx.add_window_view(|_, cx| PageEditor::new(page, Selection::caret(first, 0), cx));
+
+        let (first_screen, later) = editor.read_with(cx, |editor, _| editor.page_languages());
+        assert_eq!(first_screen, [CodeLanguage::Python]);
+        assert_eq!(
+            later,
+            [CodeLanguage::Rust],
+            "each once, and only with a grammar"
+        );
+
+        editor.update(cx, |editor, cx| editor.build_page_grammars(cx));
+        assert!(!editor.read_with(cx, |editor, _| editor.are_first_screen_grammars_built()));
+        cx.run_until_parked();
+        assert!(editor.read_with(cx, |editor, _| editor.are_first_screen_grammars_built()));
     }
 
     #[test]

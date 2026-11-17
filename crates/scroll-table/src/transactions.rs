@@ -25,6 +25,7 @@ pub fn new_row(
         position,
         row_of: Some(database.id),
         is_archived: false,
+        is_folder: false,
     };
     let transaction = Transaction::new(vec![Operation::Create(Record::Page(page.clone()))]);
     Ok((transaction, page))
@@ -178,6 +179,7 @@ mod tests {
             position: Position::between(None, None).unwrap(),
             row_of: None,
             is_archived: false,
+            is_folder: false,
         };
         let status = new_property("Status", PropertyType::Text);
         let database = Database {

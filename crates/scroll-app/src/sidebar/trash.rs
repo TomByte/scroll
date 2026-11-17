@@ -41,10 +41,17 @@ impl Sidebar {
 
     pub(super) fn render_trash(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let can_edit = !self.workspace.read(cx).is_read_only();
-        let trashed: Vec<(PageId, String)> = self
+        let trashed: Vec<(PageId, String, IconName)> = self
             .trash
             .iter()
-            .map(|page| (page.id, display_title(&page.title).to_string()))
+            .map(|page| {
+                let icon = if page.is_folder {
+                    IconName::Folder
+                } else {
+                    IconName::Page
+                };
+                (page.id, display_title(&page.title).to_string(), icon)
+            })
             .collect();
         let count = if self.is_trash_open { trashed.len() } else { 0 };
         div()
@@ -61,10 +68,10 @@ impl Sidebar {
                     .on_click(cx.listener(|sidebar, _, _, cx| sidebar.toggle_trash(cx))),
             )
             .when(self.is_trash_open, |section| {
-                section.children(trashed.into_iter().map(|(page, title)| {
+                section.children(trashed.into_iter().map(|(page, title, icon)| {
                     ListItem::new(ElementId::Name(format!("trashed-{}", page.0).into()), title)
                         .indent(theme.size.tree_indent)
-                        .icon(IconName::Page)
+                        .icon(icon)
                         .when(can_edit, |item| {
                             item.end_slot(
                                 IconButton::new(

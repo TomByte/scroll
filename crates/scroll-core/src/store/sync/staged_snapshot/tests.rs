@@ -15,6 +15,7 @@ fn new_page(title: &str) -> Page {
         position: Position::between(None, None).unwrap(),
         row_of: None,
         is_archived: false,
+        is_folder: false,
     }
 }
 

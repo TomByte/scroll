@@ -48,7 +48,7 @@ macro_rules! in_tree {
 pub(in crate::store) use in_tree;
 
 pub(in crate::store) const PAGE_COLUMNS: &str =
-    "id, parent_id, title, icon, position, row_of_database_id, is_archived";
+    "id, parent_id, title, icon, position, row_of_database_id, is_archived, is_folder";
 
 pub(in crate::store) fn read_page(
     conn: &Connection,
@@ -95,9 +95,9 @@ pub(in crate::store) fn page_lineage(
 /// Writes every column, inserting the page if it is missing. Keeps `local_key`, so the search entry survives.
 pub(in crate::store) fn upsert_page(conn: &Connection, page: &Page) -> Result<(), StoreError> {
     let updated_count = conn.prepare_cached("UPDATE page SET parent_id = ?2, title = ?3, icon = ?4, position = ?5, row_of_database_id = ?6,
-         is_archived = ?7 WHERE id = ?1")?
+         is_archived = ?7, is_folder = ?8 WHERE id = ?1")?
         .execute(
-        params![page.id, page.parent, page.title, page.icon, page.position, page.row_of, page.is_archived],
+        params![page.id, page.parent, page.title, page.icon, page.position, page.row_of, page.is_archived, page.is_folder],
     )?;
     if updated_count == 0 {
         return insert_page(conn, page);
@@ -126,10 +126,10 @@ pub(in crate::store) fn child_page_ids(
 }
 
 pub(in crate::store) fn insert_page(conn: &Connection, page: &Page) -> Result<(), StoreError> {
-    let inserted_count = conn.prepare_cached("INSERT OR IGNORE INTO page (id, parent_id, title, icon, position, row_of_database_id, is_archived)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)")?
+    let inserted_count = conn.prepare_cached("INSERT OR IGNORE INTO page (id, parent_id, title, icon, position, row_of_database_id, is_archived, is_folder)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)")?
         .execute(
-        params![page.id, page.parent, page.title, page.icon, page.position, page.row_of, page.is_archived],
+        params![page.id, page.parent, page.title, page.icon, page.position, page.row_of, page.is_archived, page.is_folder],
     )?;
     if inserted_count == 0 {
         return Ok(());
@@ -180,6 +180,7 @@ pub(in crate::store) fn page_from_row(row: &Row<'_>) -> rusqlite::Result<Page> {
         position: row.get("position")?,
         row_of: row.get("row_of_database_id")?,
         is_archived: row.get("is_archived")?,
+        is_folder: row.get("is_folder")?,
     })
 }
 

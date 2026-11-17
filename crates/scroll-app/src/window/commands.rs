@@ -1,5 +1,5 @@
-//! The window's own commands: going back and forward, the sidebar, the theme, the page width,
-//! closing and quitting.
+//! The window's own commands: going back and forward, the sidebar, the outline, the theme, the
+//! page width, closing and quitting.
 
 use scroll_ui::{IconName, ThemeId};
 
@@ -11,6 +11,7 @@ pub const GO_BACK: &str = "go.back";
 pub const GO_FORWARD: &str = "go.forward";
 pub const QUIT: &str = "app.quit";
 pub const TOGGLE_PAGE_WIDTH: &str = "view.toggle_page_width";
+pub const TOGGLE_OUTLINE: &str = "view.toggle_outline";
 
 /// What a window command does; the window carries it out.
 #[derive(Clone, PartialEq, Eq, Debug, gpui::Action)]
@@ -19,6 +20,7 @@ pub enum WindowCommand {
     GoBack,
     GoForward,
     ToggleSidebar,
+    ToggleOutline,
     TogglePageWidth,
     Theme(ThemePreference),
     Close,
@@ -78,6 +80,23 @@ pub static VIEW: &[Command] = &[
         run: Run::Dispatch {
             to: Surface::Window,
             action: |_| Box::new(WindowCommand::ToggleSidebar),
+        },
+    },
+    Command {
+        id: TOGGLE_OUTLINE,
+        title: "Toggle outline",
+        keywords: "headings contents sections navigate hide show",
+        category: Category::Appearance,
+        icon: IconName::Outline,
+        shortcut: None,
+        menu: Some(MenuName::View),
+        effect: Effect::Reads,
+        is_in_page_menu: false,
+        os_action: None,
+        is_available: always,
+        run: Run::Dispatch {
+            to: Surface::Window,
+            action: |_| Box::new(WindowCommand::ToggleOutline),
         },
     },
     Command {

@@ -17,6 +17,7 @@ use crate::workspace::page_tree::PageDrop;
 
 pub const NEW_PAGE: &str = "page.new";
 pub const NEW_SUB_PAGE: &str = "page.new_sub_page";
+pub const NEW_FOLDER: &str = "page.new_folder";
 pub const NEW_DATABASE: &str = "page.new_database";
 pub const ADD_TAG: &str = "page.add_tag";
 
@@ -25,6 +26,9 @@ pub const ADD_TAG: &str = "page.add_tag";
 #[action(namespace = scroll, no_json)]
 pub enum PageCommand {
     NewPage {
+        parent: Option<PageId>,
+    },
+    NewFolder {
         parent: Option<PageId>,
     },
     NewDatabase {
@@ -61,8 +65,9 @@ pub struct RenamePage {
 #[action(namespace = scroll, no_json)]
 pub struct ChangeIcon;
 
-/// Carries out `command` on `workspace`. Making a page or database resolves to the new page,
-/// for the caller to open; the other commands resolve to `None`.
+/// Carries out `command` on `workspace`. Making a page, folder or database resolves to what
+/// was made, for the caller to open (or, for a folder, to name); the other commands resolve to
+/// `None`.
 pub fn run(
     command: &PageCommand,
     workspace: &Entity<Workspace>,
@@ -71,6 +76,9 @@ pub fn run(
     match command.clone() {
         PageCommand::NewPage { parent } => {
             return workspace.update(cx, |workspace, cx| workspace.create_page(parent, cx));
+        }
+        PageCommand::NewFolder { parent } => {
+            return workspace.update(cx, |workspace, cx| workspace.create_folder(parent, cx));
         }
         PageCommand::NewDatabase { parent } => {
             return workspace.update(cx, |workspace, cx| workspace.create_database(parent, cx));
@@ -180,6 +188,29 @@ pub static COMMANDS: &[Command] = &[
             action: |target| {
                 Box::new(PageCommand::NewPage {
                     parent: target.page_or_current(),
+                })
+            },
+        },
+    },
+    Command {
+        id: NEW_FOLDER,
+        title: "New folder",
+        keywords: "create directory group organise",
+        category: Category::Page,
+        icon: IconName::Folder,
+        shortcut: None,
+        menu: Some(MenuName::File),
+        effect: Effect::Edits,
+        is_in_page_menu: true,
+        os_action: None,
+        is_available: always,
+        run: Run::Dispatch {
+            to: Surface::Workspace,
+            // From a page's menu the folder goes inside that page or folder; from anywhere
+            // else, at the top level.
+            action: |target| {
+                Box::new(PageCommand::NewFolder {
+                    parent: target.page,
                 })
             },
         },

@@ -159,6 +159,7 @@ fn tasks_database(path: &Path) -> (PageId, DatabaseId) {
         position: Position::between(None, None).unwrap(),
         row_of: None,
         is_archived: false,
+        is_folder: false,
     };
     let option = |name: &str| SelectOption {
         id: SelectOptionId::generate(),

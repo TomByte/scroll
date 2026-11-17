@@ -74,6 +74,7 @@ fn page(title: String, row_of: Option<DatabaseId>) -> Page {
         position: Position::between(None, None).unwrap(),
         row_of,
         is_archived: false,
+        is_folder: false,
     }
 }
 

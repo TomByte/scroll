@@ -670,6 +670,9 @@ fn the_page_width_setting_reaches_an_open_editor(cx: &mut TestAppContext) {
     );
 }
 
+mod scrolling;
+mod tables;
+
 mod block_drag {
     use std::time::Duration;
 

@@ -295,6 +295,7 @@ fn deleting_a_page_on_a_local_only_workspace_removes_its_content_and_search_text
         position: Position::between(None, None).unwrap(),
         row_of: None,
         is_archived: false,
+        is_folder: false,
     };
     let page_id = page.id;
     store
@@ -343,6 +344,7 @@ fn refreshing_search_indexes_text_still_waiting_for_the_server() {
         position: Position::between(None, None).unwrap(),
         row_of: None,
         is_archived: false,
+        is_folder: false,
     };
     let page_id = page.id;
     store
