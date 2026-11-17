@@ -1,14 +1,19 @@
 //! Drawing Mermaid source as an image, without a browser: `mermaid-rs-renderer` parses it and
 //! lays it out as SVG, and resvg (the version gpui draws its icons with) turns that into pixels
 //! gpui can show. Both measure and draw labels with the same system fonts, so text fits its
-//! boxes. Drawing takes a few milliseconds for a typical diagram, so it runs off the main
-//! thread (`diagram_block`).
+//! boxes. A flowchart's edges are routed again between the two (`routing`). Drawing takes a few
+//! milliseconds for a typical diagram, so it runs off the main thread (`diagram_block`).
+
+mod routing;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, LazyLock};
 
 use gpui::{Hsla, Pixels, RenderImage, Size, hsla, px, size};
-use mermaid_rs_renderer::{ParseError, RenderOptions, render_strict};
+use mermaid_rs_renderer::{
+    DiagramKind, Layout, ParseError, RenderOptions, compute_layout, parse_mermaid_strict,
+    render_svg,
+};
 use resvg::tiny_skia::{Pixmap, Transform};
 use resvg::usvg;
 use scroll_ui::Theme;
@@ -166,8 +171,8 @@ fn diagram_svg(source: &str, style: &DiagramStyle) -> Result<String, DiagramErro
     };
     // A young third-party layout engine fed whatever is typed: a panic in it must not take
     // the app down, only fail this one drawing.
-    match catch_unwind(AssertUnwindSafe(|| render_strict(source, options))) {
-        Ok(svg) => Ok(svg?),
+    match catch_unwind(AssertUnwindSafe(|| laid_out_svg(source, &options))) {
+        Ok(svg) => svg,
         Err(_) => {
             log::warn!(
                 "the Mermaid renderer panicked on a diagram of {} bytes",
@@ -178,13 +183,62 @@ fn diagram_svg(source: &str, style: &DiagramStyle) -> Result<String, DiagramErro
     }
 }
 
-/// The SVG's pixels at `DRAWING_SCALE` (less for a very large diagram), and its size in points.
-fn rasterize(svg: &str) -> Result<(Pixmap, Size<Pixels>), DiagramError> {
-    let options = usvg::Options {
+/// What the crate's `render_strict` does, with a flowchart tidied between its layout and its
+/// drawing.
+fn laid_out_svg(source: &str, options: &RenderOptions) -> Result<String, DiagramError> {
+    let parsed = parse_mermaid_strict(source)?;
+    let mut layout = compute_layout(&parsed.graph, &options.theme, &options.layout);
+    if layout.kind == DiagramKind::Flowchart {
+        fit_edge_labels(&mut layout, &options.theme)?;
+        routing::straighten_edges(&mut layout, parsed.graph.direction);
+    }
+    Ok(render_svg(&layout, &options.theme, &options.layout))
+}
+
+/// Gives each edge label the width its text is drawn at. The crate sizes a label for larger
+/// text than it draws, so the box it puts behind a label on a line would hide a third more of
+/// the line than the words do.
+fn fit_edge_labels(
+    layout: &mut Layout,
+    theme: &mermaid_rs_renderer::Theme,
+) -> Result<(), usvg::Error> {
+    let edges = layout.edges.iter_mut();
+    for label in edges.filter_map(|edge| edge.label.as_mut()) {
+        label.width = drawn_width(&label.lines, theme)?;
+    }
+    Ok(())
+}
+
+/// How wide the longest of `lines` is when drawn as a label.
+fn drawn_width(lines: &[String], theme: &mermaid_rs_renderer::Theme) -> Result<f32, usvg::Error> {
+    // Quotes round a family name would end the attribute; the renderer leaves them out too.
+    let font_family = theme.font_family.replace(['"', '\''], "");
+    let texts: String = lines
+        .iter()
+        .map(|line| {
+            let text = line.replace('&', "&amp;").replace('<', "&lt;");
+            format!("<text>{text}</text>")
+        })
+        .collect();
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" font-family="{font_family}" font-size="{}">{texts}</svg>"#,
+        theme.font_size
+    );
+    let tree = usvg::Tree::from_str(&svg, &svg_options())?;
+    Ok(tree.root().abs_bounding_box().width())
+}
+
+/// Reading an SVG with the fonts its text is drawn in.
+fn svg_options() -> usvg::Options<'static> {
+    usvg::Options {
         fontdb: FONTS.clone(),
         ..usvg::Options::default()
-    };
-    let tree = usvg::Tree::from_str(svg, &options)?;
+    }
+}
+
+/// The SVG's pixels at `DRAWING_SCALE` (less for a very large diagram), and its size in points.
+fn rasterize(svg: &str) -> Result<(Pixmap, Size<Pixels>), DiagramError> {
+    let tree = usvg::Tree::from_str(svg, &svg_options())?;
     let natural = tree.size();
     let scale = DRAWING_SCALE.min(MAX_DRAWN_SIDE / natural.width().max(natural.height()));
     let mut pixmap = Pixmap::new(
@@ -231,10 +285,21 @@ fn hex(color: Hsla) -> String {
 mod tests {
     use std::time::{Duration, Instant};
 
+    use mermaid_rs_renderer::render_strict;
+
     use super::*;
 
     fn style() -> DiagramStyle {
         DiagramStyle::for_tests()
+    }
+
+    /// `source` as the crate draws it by itself.
+    fn crate_svg(source: &str) -> String {
+        let options = RenderOptions {
+            theme: style().mermaid_theme(),
+            ..RenderOptions::modern()
+        };
+        render_strict(source, options).unwrap()
     }
 
     /// How many pixels of `a` differ from `b`; both are the same size.
@@ -298,6 +363,59 @@ mod tests {
         for source in sources {
             assert!(draw(source, &style()).is_ok(), "{source}");
         }
+    }
+
+    #[test]
+    fn only_a_flowchart_is_changed_once_the_crate_has_laid_it_out() {
+        let roundabout = "flowchart LR
+    A[Pull request] --> B{Who opened it?}
+    B -->|a person| C[One approval, then merge]
+    B -->|Renovate, major| C";
+        assert_ne!(
+            diagram_svg(roundabout, &style()).unwrap(),
+            crate_svg(roundabout)
+        );
+        let other_kinds = [
+            "sequenceDiagram\n    App->>Server: Push\n    Server-->>App: Ack",
+            "classDiagram\n    Page <|-- Draft\n    Page *-- Block : holds",
+            "stateDiagram-v2\n    [*] --> Draft\n    Draft --> Review : ready",
+            "erDiagram\n    PAGE ||--|{ BLOCK : contains",
+        ];
+        for source in other_kinds {
+            assert_eq!(
+                diagram_svg(source, &style()).unwrap(),
+                crate_svg(source),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_edge_label_is_as_wide_as_its_text_is_drawn() {
+        let theme = style().mermaid_theme();
+        let width = |lines: &[&str]| {
+            let lines: Vec<String> = lines.iter().map(|line| line.to_string()).collect();
+            drawn_width(&lines, &theme).unwrap()
+        };
+        let short = width(&["yes"]);
+        let long = width(&["Renovate, major"]);
+        assert!(short > 10.0 && long > 3.0 * short, "{short} {long}");
+        assert_eq!(width(&["yes", "Renovate, major"]), long, "the longest line");
+        assert!(
+            width(&["a < b & c"]) > short,
+            "text that is not XML as it stands"
+        );
+
+        let source = "flowchart LR\n    A[Start] -->|Renovate, major| B[End]";
+        let parsed = parse_mermaid_strict(source).unwrap();
+        let mut layout = compute_layout(&parsed.graph, &theme, &RenderOptions::modern().layout);
+        let label_width = |layout: &Layout| layout.edges[0].label.as_ref().unwrap().width;
+        assert!(
+            label_width(&layout) > long + 20.0,
+            "the crate allows for larger text"
+        );
+        fit_edge_labels(&mut layout, &theme).unwrap();
+        assert_eq!(label_width(&layout), long);
     }
 
     #[test]
