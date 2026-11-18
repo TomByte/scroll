@@ -1,12 +1,11 @@
 //! The page tree: navigation, create, rename in place, drag to reorder or nest, context
-//! menu, and the trash. All tree logic lives in `workspace::page_tree`; this view only maps
+//! menu, and the way into the trash. All tree logic lives in `workspace::page_tree`; this view only maps
 //! pointer and keyboard input onto it. A folder is a row like a page's that holds other rows
 //! and opens and closes instead of opening a page.
 
 mod resize;
 mod rows;
 mod tags;
-mod trash;
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -32,6 +31,7 @@ use crate::page::commands::{NEW_DATABASE, NEW_FOLDER, NEW_PAGE};
 use crate::palette::commands::OPEN_PALETTE;
 use crate::sync_status::empty_text;
 use crate::title_bar;
+use crate::trash::TrashDialog;
 use crate::workspace::page_tree::{PageDrop, TreeRow};
 use crate::workspace::storage::CHILDREN_BATCH;
 use crate::workspace::{Workspace, WorkspaceEvent};
@@ -72,15 +72,12 @@ pub struct Sidebar {
     renaming: Option<Renaming>,
     popups: Entity<PopupHost>,
     drop: Option<PageDrop>,
-    is_trash_open: bool,
     /// Whether the Tags section lists its tags; closed until its heading is clicked.
     are_tags_shown: bool,
     /// Tags picked in the Tags section; the pages carrying all of them are listed.
     selected_tags: Vec<TagId>,
     /// The pages carrying every selected tag, read from the store (at most `TAGGED_LIMIT`).
     tagged_pages: Vec<Page>,
-    /// Archived pages, read when the trash is opened.
-    trash: Vec<Page>,
     /// The visible tree rows, rebuilt only when the tree or expansion changes.
     rows: Option<Rc<Vec<TreeRow>>>,
     /// Expanded parents whose children have been asked for.
@@ -137,11 +134,9 @@ impl Sidebar {
             renaming: None,
             popups: cx.new(|_| PopupHost::new()),
             drop: None,
-            is_trash_open: false,
             are_tags_shown: false,
             selected_tags: Vec::new(),
             tagged_pages: Vec::new(),
-            trash: Vec::new(),
             rows: None,
             requested: HashSet::new(),
             scroll: UniformListScrollHandle::new(),
@@ -298,6 +293,15 @@ impl Sidebar {
         });
     }
 
+    fn open_trash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let workspace = self.workspace.clone();
+        self.overlays.show_modal(
+            |window, cx| TrashDialog::new(workspace, window, cx),
+            window,
+            cx,
+        );
+    }
+
     pub(super) fn start_renaming(
         &mut self,
         page: PageId,
@@ -421,7 +425,9 @@ impl Render for Sidebar {
         let list_theme = theme.clone();
         let reveal = Transition::Reveal.progress("page-tree-reveal", self.revealed, window, cx);
         let revealing = self.revealed.filter(|_| reveal < 1.0);
-        let trash = self.render_trash(&theme, cx);
+        let trash = ListItem::new("trash", "Trash")
+            .icon(IconName::Trash)
+            .on_click(cx.listener(|sidebar, _, window, cx| sidebar.open_trash(window, cx)));
         let tag_rows = self.render_tags(&theme, cx);
         div()
             .track_focus(&self.focus_handle)
@@ -547,7 +553,12 @@ impl Render for Sidebar {
                     .flex_col()
                     .children(tag_rows),
             )
-            .child(div().py(theme.spacing.sm).child(trash))
+            .child(
+                div()
+                    .debug_selector(|| "open-trash".into())
+                    .py(theme.spacing.sm)
+                    .child(trash),
+            )
             .child(self.popups.clone())
             .child(ResizeHandle::new("sidebar-resize").on_press(cx.listener(
                 |sidebar, event: &gpui::MouseDownEvent, _, cx| sidebar.start_resizing(event, cx),

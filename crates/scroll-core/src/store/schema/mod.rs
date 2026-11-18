@@ -243,6 +243,19 @@ const MIGRATIONS: &[Migration] = &[
     "),
     // Pages that are folders: they group the pages under them and have no content.
     Migration::Sql("ALTER TABLE page ADD COLUMN is_folder INTEGER NOT NULL DEFAULT 0;"),
+    // When each page went to the trash, for the trash to list the latest first and say how long
+    // ago. This file's own note, not a synced field: it is when the change was made or arrived
+    // here. A trigger keeps it so that no way of writing `is_archived` can miss it. A page that
+    // was in the trash before this, or that arrives already archived, has no time.
+    Migration::Sql(
+        "
+    ALTER TABLE page ADD COLUMN archived_at INTEGER;
+    CREATE TRIGGER page_archived_at AFTER UPDATE OF is_archived ON page
+        WHEN NEW.is_archived AND NOT OLD.is_archived
+    BEGIN
+        UPDATE page SET archived_at = unixepoch() WHERE local_key = NEW.local_key;
+    END;
+    "),
 ];
 
 /// Whether the file's schema is behind this build's, so opening it will run migrations.
@@ -353,6 +366,40 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!((stored.title.as_str(), stored.is_folder), ("Old", false));
+    }
+
+    #[test]
+    fn a_page_in_the_trash_before_it_kept_times_has_none_until_it_goes_there_again() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        // Migrations are append-only, so the trash's times stay at this index.
+        let trash_step = 18;
+        for migration in &MIGRATIONS[..trash_step] {
+            match migration {
+                Migration::Sql(sql) => conn.execute_batch(sql).unwrap(),
+                Migration::Code(step) => step(&conn).unwrap(),
+            }
+        }
+        conn.pragma_update(None, "user_version", trash_step)
+            .unwrap();
+        let position = crate::position::Position::between(None, None).unwrap();
+        conn.execute(
+            "INSERT INTO page (id, title, position, is_archived) VALUES (?1, 'Old', ?2, 1)",
+            rusqlite::params![PageId::generate(), position],
+        )
+        .unwrap();
+
+        migrate(&mut conn).unwrap();
+        let archived_at = |conn: &Connection| -> Option<i64> {
+            conn.query_row("SELECT archived_at FROM page", [], |row| row.get(0))
+                .unwrap()
+        };
+        assert_eq!(archived_at(&conn), None);
+        // Written as archived again, it has not gone anywhere, so it still has no time.
+        conn.execute("UPDATE page SET is_archived = 1", []).unwrap();
+        assert_eq!(archived_at(&conn), None);
+        conn.execute("UPDATE page SET is_archived = 0", []).unwrap();
+        conn.execute("UPDATE page SET is_archived = 1", []).unwrap();
+        assert!(archived_at(&conn).is_some());
     }
 
     #[test]

@@ -25,7 +25,7 @@ use crate::page_doc::PageDocError;
 use crate::validation::ValidationError;
 
 pub use content::{PageCatchUp, SequencedBytes};
-pub use query::{ChildPage, SearchHit, TagUsage, ViewRowIds};
+pub use query::{ChildPage, SearchHit, TagUsage, TrashedPage, ViewRowIds};
 pub use sync::{
     QueuedChange, QueuedEntry, QueuedPageUpdate, SnapshotFinishProgress, StoreChanges,
     WorkspaceLink,

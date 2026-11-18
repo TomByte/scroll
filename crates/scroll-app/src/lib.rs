@@ -16,5 +16,6 @@ mod settings;
 mod sidebar;
 mod sync_status;
 mod title_bar;
+mod trash;
 mod window;
 mod workspace;

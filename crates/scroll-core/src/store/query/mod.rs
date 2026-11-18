@@ -7,4 +7,4 @@ pub(in crate::store) mod tree;
 pub use crate::store::search::SearchHit;
 pub use table::ViewRowIds;
 pub use tags::TagUsage;
-pub use tree::ChildPage;
+pub use tree::{ChildPage, TrashedPage};

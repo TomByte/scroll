@@ -97,6 +97,30 @@ fn the_palette_opens_pages_and_runs_commands(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn the_sidebar_s_trash_opens_the_trash_with_the_deleted_page_in_it(cx: &mut TestAppContext) {
+    let (app, workspace, cx) = open_app(cx);
+    let first = app.read_with(cx, |app, _| app.current_page()).unwrap();
+    cx.update(|_, cx| workspace.update(cx, |workspace, cx| workspace.archive(first, cx)));
+    cx.run_until_parked();
+    let is_trash_open = |cx: &mut VisualTestContext| {
+        app.read_with(cx, |app, cx| {
+            let dialog = app.overlays.showing::<crate::trash::TrashDialog>(cx);
+            dialog.is_some()
+        })
+    };
+    assert!(!is_trash_open(cx));
+
+    let trash = cx
+        .debug_bounds("open-trash")
+        .expect("the sidebar's Trash row");
+    cx.simulate_click(trash.center(), gpui::Modifiers::none());
+    cx.run_until_parked();
+    assert!(is_trash_open(cx));
+    let first_row = cx.debug_bounds("trashed-0");
+    assert!(first_row.is_some(), "the deleted page is listed");
+}
+
+#[gpui::test]
 fn a_database_is_open_on_the_server_only_while_it_is_on_screen(cx: &mut TestAppContext) {
     let (app, workspace, cx) = open_app(cx);
     cx.simulate_keystrokes("cmd-alt-n");

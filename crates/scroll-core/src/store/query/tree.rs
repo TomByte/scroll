@@ -9,6 +9,18 @@ use crate::store::kinds::page::{PAGE_COLUMNS, in_tree, page_from_row, read_page}
 const IN_TREE: &str = in_tree!();
 use crate::store::{StoreError, WorkspaceStore, sql_limit};
 
+/// A page in the trash, with what the trash says about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrashedPage {
+    pub page: Page,
+    /// When it went to the trash, in seconds since 1970: when that was done here, or when the
+    /// change arrived from elsewhere. `None` if this file never saw it go (see the migration
+    /// that adds the column).
+    pub archived_at: Option<i64>,
+    /// The title of the page it is under, if it is under one.
+    pub parent_title: Option<String>,
+}
+
 /// A page in the tree and how many children it shows, so the sidebar can draw a disclosure
 /// arrow without loading them.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,17 +98,27 @@ impl WorkspaceStore {
         Ok(pages)
     }
 
-    /// Archived pages that are not database rows (the trash), by title.
-    pub fn archived_pages(&self) -> Result<Vec<Page>, StoreError> {
+    /// The trash: archived pages that are not database rows, the one archived last first.
+    /// Those with no time come after the rest, by title.
+    pub fn trashed_pages(&self) -> Result<Vec<TrashedPage>, StoreError> {
         let sql = format!(
-            "SELECT {PAGE_COLUMNS} FROM page
+            "SELECT {PAGE_COLUMNS}, archived_at,
+                    (SELECT parent.title FROM page AS parent WHERE parent.id = page.parent_id)
+                        AS parent_title
+             FROM page
              WHERE is_archived AND row_of_database_id IS NULL
-             ORDER BY title COLLATE NOCASE, id"
+             ORDER BY archived_at DESC NULLS LAST, title COLLATE NOCASE, id"
         );
         let pages = self
             .conn
             .prepare_cached(&sql)?
-            .query_map([], page_from_row)?
+            .query_map([], |row| {
+                Ok(TrashedPage {
+                    page: page_from_row(row)?,
+                    archived_at: row.get("archived_at")?,
+                    parent_title: row.get("parent_title")?,
+                })
+            })?
             .collect::<Result<_, _>>()?;
         Ok(pages)
     }
@@ -108,7 +130,7 @@ mod tests {
     use crate::operation::{FieldChange, Operation, PageField, Record, Transaction};
     use crate::position::Position;
     use crate::record::{Database, Page};
-    use crate::store::{WorkspaceStore, open_in_memory};
+    use crate::store::open_in_memory;
 
     fn page(title: &str, parent: Option<PageId>, position: &Position) -> Page {
         Page {
@@ -155,41 +177,92 @@ mod tests {
         assert_eq!((renamed.title.as_str(), renamed.is_folder), ("Work", true));
     }
 
+    fn set_archived(id: PageId, is_archived: bool) -> Transaction {
+        Transaction::new(vec![Operation::Set(FieldChange::Page {
+            id,
+            field: PageField::IsArchived(is_archived),
+        })])
+    }
+
     #[test]
-    fn the_trash_lists_archived_pages_by_title_and_restoring_takes_one_out() {
+    fn the_trash_lists_the_page_archived_last_first_and_restoring_takes_one_out() {
         let mut store = open_in_memory();
         let position = Position::between(None, None).unwrap();
-        let archived = |title: &str| Page {
+        let parent = page("Projects", None, &position);
+        let plan = page("Plan", Some(parent.id), &position);
+        let notes = page("Notes", None, &position);
+        // In the trash from the start, as a page is that syncs to a new device already there.
+        let arrived = Page {
             is_archived: true,
-            ..page(title, None, &position)
+            ..page("Arrived", None, &position)
         };
-        let (later, earlier) = (archived("b old"), archived("A old"));
-        let live = page("Live", None, &position);
-        let operations = [
-            Record::Page(later.clone()),
-            Record::Page(earlier.clone()),
-            Record::Page(live),
-        ]
-        .into_iter()
-        .map(Operation::Create)
-        .collect();
+        let created = [&parent, &plan, &notes, &arrived]
+            .map(|page| Operation::Create(Record::Page(page.clone())));
         store
-            .apply_local_transaction(&Transaction::new(operations))
+            .apply_local_transaction(&Transaction::new(created.into()))
             .unwrap();
-        let trash = |store: &WorkspaceStore| -> Vec<String> {
-            let pages = store.archived_pages().unwrap();
-            pages.into_iter().map(|page| page.title).collect()
-        };
-        assert_eq!(trash(&store), ["A old", "b old"]);
+        for page in [&plan, &notes] {
+            store
+                .apply_local_transaction(&set_archived(page.id, true))
+                .unwrap();
+        }
+        // Both went in within the same second, so move one back an hour to tell them apart.
+        store
+            .conn
+            .execute(
+                "UPDATE page SET archived_at = archived_at - 3600 WHERE id = ?1",
+                [plan.id],
+            )
+            .unwrap();
 
-        let restore = Operation::Set(FieldChange::Page {
-            id: earlier.id,
-            field: PageField::IsArchived(false),
-        });
+        let trash = store.trashed_pages().unwrap();
+        let titles: Vec<&str> = trash
+            .iter()
+            .map(|trashed| trashed.page.title.as_str())
+            .collect();
+        assert_eq!(titles, ["Notes", "Plan", "Arrived"]);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let notes_archived_at = trash[0]
+            .archived_at
+            .expect("archived here, so it has a time");
+        assert!(
+            (now - notes_archived_at).abs() < 60,
+            "{notes_archived_at} is not now"
+        );
+        assert_eq!(trash[1].archived_at, Some(notes_archived_at - 3600));
+        assert_eq!(trash[2].archived_at, None, "this file never saw it go");
+        assert_eq!(trash[1].parent_title.as_deref(), Some("Projects"));
+        assert_eq!(trash[0].parent_title, None);
+
         store
-            .apply_local_transaction(&Transaction::new(vec![restore]))
+            .apply_local_transaction(&set_archived(notes.id, false))
             .unwrap();
-        assert_eq!(trash(&store), ["b old"]);
+        let trash = store.trashed_pages().unwrap();
+        let titles: Vec<&str> = trash
+            .iter()
+            .map(|trashed| trashed.page.title.as_str())
+            .collect();
+        assert_eq!(titles, ["Plan", "Arrived"]);
+    }
+
+    #[test]
+    fn a_page_archived_elsewhere_has_the_time_the_change_arrived() {
+        let mut store = crate::store::open_linked_in_memory();
+        let position = Position::between(None, None).unwrap();
+        let shared = page("Shared", None, &position);
+        let create = Transaction::new(vec![Operation::Create(Record::Page(shared.clone()))]);
+        store.apply_remote_transaction(1, &create).unwrap();
+        assert!(store.trashed_pages().unwrap().is_empty());
+
+        store
+            .apply_remote_transaction(2, &set_archived(shared.id, true))
+            .unwrap();
+        let trash = store.trashed_pages().unwrap();
+        assert_eq!(trash.len(), 1);
+        assert!(trash[0].archived_at.is_some());
     }
 
     #[test]
