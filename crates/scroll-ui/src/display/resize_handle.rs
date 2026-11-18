@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, AnyView, App, CursorStyle, ElementId, InteractiveElement, IntoElement, MouseButton,
-    MouseDownEvent, ParentElement, RenderOnce, Styled, Window, div,
+    MouseDownEvent, ParentElement, RenderOnce, Styled, Window, div, prelude::FluentBuilder,
 };
 
 use crate::foundation::story::stateless_story;
@@ -10,20 +10,35 @@ use crate::theme::Theme;
 
 type PressHandler = Rc<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>;
 
-/// A thin strip on the right edge of its (relatively positioned) parent, such as a column
-/// header, that shows where to drag to resize it. The owner tracks the drag from `on_press`.
+/// A thin strip on an edge of its (relatively positioned) parent, such as a column header, that
+/// shows where to drag to resize it: the right edge unless `on_left_edge` is called. The owner
+/// tracks the drag from `on_press`.
 #[derive(IntoElement)]
 pub struct ResizeHandle {
     id: ElementId,
+    edge: Edge,
     on_press: Option<PressHandler>,
+}
+
+#[derive(Clone, Copy)]
+enum Edge {
+    Left,
+    Right,
 }
 
 impl ResizeHandle {
     pub fn new(id: impl Into<ElementId>) -> Self {
         ResizeHandle {
             id: id.into(),
+            edge: Edge::Right,
             on_press: None,
         }
+    }
+
+    /// For a pane at the trailing side of the window, which is resized by its left edge.
+    pub fn on_left_edge(mut self) -> Self {
+        self.edge = Edge::Left;
+        self
     }
 
     pub fn on_press(
@@ -43,7 +58,10 @@ impl RenderOnce for ResizeHandle {
             .id(self.id)
             .absolute()
             .top_0()
-            .right_0()
+            .map(|handle| match self.edge {
+                Edge::Left => handle.left_0(),
+                Edge::Right => handle.right_0(),
+            })
             .h_full()
             .w(theme.spacing.xs)
             .cursor(CursorStyle::ResizeColumn)
@@ -73,8 +91,9 @@ fn render_story(window: &mut Window, cx: &mut App) -> AnyElement {
         .px(theme.spacing.md)
         .border(theme.size.border_width)
         .border_color(theme.colors.border)
-        .child("Hover the right edge")
+        .child("Hover either edge")
         .child(ResizeHandle::new("resize"))
+        .child(ResizeHandle::new("resize-left").on_left_edge())
         .into_any_element()
 }
 

@@ -125,6 +125,8 @@ pub struct AppSettings {
     pub window: Option<WindowFrame>,
     /// The sidebar's width as last dragged; unset until it is first resized.
     pub sidebar_width: Option<f32>,
+    /// The outline's width as last dragged; unset until it is first resized.
+    pub outline_width: Option<f32>,
 }
 
 impl AppSettings {
@@ -168,6 +170,7 @@ mod tests {
                 height: 700.0,
             }),
             sidebar_width: Some(320.0),
+            outline_width: Some(260.0),
         };
         settings.save(&directory).unwrap();
         assert_eq!(AppSettings::load(&directory), settings);

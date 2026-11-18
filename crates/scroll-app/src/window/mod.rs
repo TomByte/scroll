@@ -26,6 +26,7 @@ use scroll_ui::{EmptyState, Theme};
 use crate::accounts::Accounts;
 use crate::commands::CommandUsage;
 use crate::commands::{RunCommand, Target};
+use crate::editor::outline;
 use crate::overlays::Overlays;
 use crate::page::commands::NEW_PAGE;
 use crate::page::{PageView, PageViewEvent};
@@ -85,6 +86,9 @@ impl AppWindow {
         let expanded: HashSet<PageId> = workspace_settings.expanded_pages.iter().copied().collect();
         let overlays = Overlays::new(cx);
         let sidebar_width = settings.sidebar_width.map(gpui::px);
+        if let Some(width) = settings.outline_width {
+            outline::set_width(gpui::px(width), cx);
+        }
         let sidebar = cx.new(|cx| {
             let sidebar = Sidebar::new(
                 workspace.clone(),
@@ -385,7 +389,12 @@ impl AppWindow {
         if let Err(error) = self.workspace_settings.save(self.workspace.read(cx).path()) {
             log::error!("could not save the workspace's settings: {error}");
         }
-        if let Err(error) = self.settings.save(&self.data_directory) {
+        // The outline is the editor's, which keeps its width; every other setting is kept here.
+        let settings = AppSettings {
+            outline_width: outline::dragged_width(cx).map(f32::from),
+            ..self.settings.clone()
+        };
+        if let Err(error) = settings.save(&self.data_directory) {
             log::error!("could not save settings: {error}");
         }
         if let Some(page) = self.page.as_ref() {

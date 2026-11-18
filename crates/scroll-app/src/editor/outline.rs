@@ -1,16 +1,17 @@
-//! The outline: the page's headings listed beside it, with the ones whose sections are on
-//! screen marked and kept in view as the page scrolls. Clicking a heading scrolls to it and
-//! puts the caret there.
+//! The outline: the page's headings listed beside it, with the one the reader is on marked and
+//! kept in view as the page scrolls. Clicking a heading scrolls to it and puts the caret
+//! there. The outline's left edge drags to resize it, and a double click there resets it.
 
 use std::ops::Range;
 
 use gpui::{
-    AnyElement, Context, ElementId, FontWeight, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Pixels, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window,
-    div, prelude::FluentBuilder, px,
+    AnyElement, App, Context, DispatchPhase, ElementId, Global, InteractiveElement, IntoElement,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, ScrollHandle,
+    SharedString, StatefulInteractiveElement, Styled, Window, canvas, div, prelude::FluentBuilder,
+    px,
 };
 use scroll_settings::{AnySetting, Category, Setting};
-use scroll_ui::{Ellipsis, SectionHeader, Theme};
+use scroll_ui::{Ellipsis, ResizeHandle, SectionHeader, Theme};
 
 use super::PageEditor;
 use crate::editor::document::{BlockId, BlockKind};
@@ -25,26 +26,53 @@ pub const SHOW_OUTLINE: Setting<bool> = Setting {
 
 pub static SETTINGS: &[&dyn AnySetting] = &[&SHOW_OUTLINE];
 
-const OUTLINE_WIDTH: Pixels = px(232.0);
-/// The rail down the outline's left edge, lit beside the headings on screen.
-const RAIL_WIDTH: Pixels = px(2.0);
+const DEFAULT_WIDTH: Pixels = px(232.0);
+const MIN_WIDTH: Pixels = px(176.0);
+const MAX_WIDTH: Pixels = px(420.0);
 const UNTITLED_HEADING: &str = "Untitled";
+
+/// How wide the outline was last dragged. It is as wide beside every page, and the window keeps
+/// the width between runs.
+#[derive(Clone, Copy)]
+struct DraggedWidth(Pixels);
+
+impl Global for DraggedWidth {}
+
+/// The width the outline was last dragged to; `None` if it never was.
+pub fn dragged_width(cx: &App) -> Option<Pixels> {
+    cx.try_global::<DraggedWidth>().map(|dragged| dragged.0)
+}
+
+/// Makes the outline `width` wide, or as near to that as it may be.
+pub fn set_width(width: Pixels, cx: &mut App) {
+    cx.set_global(DraggedWidth(width.clamp(MIN_WIDTH, MAX_WIDTH)));
+}
 
 struct OutlineEntry {
     block: BlockId,
     /// 1 for the largest heading.
     level: usize,
     title: SharedString,
-    is_in_view: bool,
+    /// Whether it is the heading the reader is on.
+    is_current: bool,
 }
 
-/// The outline's own scroll position, and what it last brought into view.
+/// The outline's own state: where it is scrolled to, what it last brought into view, and a drag
+/// of its edge.
 #[derive(Default)]
-pub(super) struct OutlineScroll {
-    handle: ScrollHandle,
-    /// The first heading in view as of the last frame, so the outline follows the page when
-    /// that changes and is otherwise left where the reader scrolled it.
+pub(super) struct OutlinePane {
+    scroll: ScrollHandle,
+    /// The current heading as of the last frame, so the outline follows the page when that
+    /// changes and is otherwise left where the reader scrolled it.
     followed: Option<usize>,
+    resizing: Option<Resizing>,
+}
+
+/// A drag of the outline's edge in progress.
+#[derive(Clone, Copy)]
+struct Resizing {
+    start_x: Pixels,
+    start_width: Pixels,
 }
 
 fn heading_level(kind: BlockKind) -> Option<usize> {
@@ -56,16 +84,17 @@ fn heading_level(kind: BlockKind) -> Option<usize> {
     }
 }
 
-/// Which of `headings` (their places among the page's blocks, in order) are in view when the
-/// blocks in `visible` are on screen: the heading whose section the top of the screen is in,
-/// and every heading that starts on screen. A range of positions in `headings`.
-fn headings_in_view(headings: &[usize], visible: &Range<usize>) -> Range<usize> {
-    if visible.is_empty() {
-        return 0..0;
+/// The heading the reader is on while they are at the block `place` and the blocks in `visible`
+/// are on screen, as a position in `headings` (their places among the page's blocks, in order):
+/// the heading of the section `place` is in. Above the first heading there is no section, so
+/// it is that heading once it is on screen.
+fn current_heading(headings: &[usize], place: usize, visible: &Range<usize>) -> Option<usize> {
+    let started_by_place = headings.partition_point(|heading| *heading <= place);
+    if started_by_place > 0 {
+        return Some(started_by_place - 1);
     }
-    let started_by_top = headings.partition_point(|heading| *heading <= visible.start);
-    let started_by_bottom = headings.partition_point(|heading| *heading < visible.end);
-    started_by_top.saturating_sub(1)..started_by_bottom
+    let first = headings.first()?;
+    visible.contains(first).then_some(0)
 }
 
 impl PageEditor {
@@ -82,6 +111,21 @@ impl PageEditor {
         self.rows.span(first_row).start..self.rows.span(last_row).end
     }
 
+    /// The block the reader is at: the one the caret is in or that is selected while that is on
+    /// screen, since that is where they clicked or are typing, and otherwise the one at the top
+    /// of the screen.
+    fn reading_place(&self, visible: &Range<usize>) -> Option<usize> {
+        if visible.is_empty() {
+            return None;
+        }
+        let chosen = match self.block_selection {
+            Some(selection) => selection.head,
+            None => self.selection.block,
+        };
+        let chosen_on_screen = self.block_index(chosen).filter(|at| visible.contains(at));
+        Some(chosen_on_screen.unwrap_or(visible.start))
+    }
+
     fn outline_entries(&self, visible_rows: &Range<usize>) -> Vec<OutlineEntry> {
         let headings: Vec<(usize, usize)> = self
             .blocks
@@ -90,7 +134,10 @@ impl PageEditor {
             .filter_map(|(index, block)| Some((index, heading_level(block.info.kind)?)))
             .collect();
         let places: Vec<usize> = headings.iter().map(|(index, _)| *index).collect();
-        let in_view = headings_in_view(&places, &self.visible_blocks(visible_rows));
+        let visible = self.visible_blocks(visible_rows);
+        let current = self
+            .reading_place(&visible)
+            .and_then(|place| current_heading(&places, place, &visible));
         headings
             .into_iter()
             .enumerate()
@@ -105,18 +152,19 @@ impl PageEditor {
                     } else {
                         title.to_string().into()
                     },
-                    is_in_view: in_view.contains(&position),
+                    is_current: current == Some(position),
                 }
             })
             .collect()
     }
 
-    /// Each heading's title and whether the outline marks it as in view, as of the last frame.
+    /// Each heading's title and whether the outline marks it as the current one, as of the
+    /// last frame.
     #[cfg(test)]
-    pub(super) fn outline_in_view(&self) -> Vec<(SharedString, bool)> {
+    pub(super) fn outline_headings(&self) -> Vec<(SharedString, bool)> {
         self.outline_entries(&self.scroll.visible_rows())
             .into_iter()
-            .map(|entry| (entry.title, entry.is_in_view))
+            .map(|entry| (entry.title, entry.is_current))
             .collect()
     }
 
@@ -144,49 +192,63 @@ impl PageEditor {
                 self.render_outline_entry(position, depth, entry, theme, cx)
             })
             .collect();
+        let headings = div()
+            .id("outline-headings")
+            .size_full()
+            .overflow_y_scroll()
+            .track_scroll(&self.outline.scroll)
+            .px(theme.spacing.sm)
+            .pb(theme.spacing.lg)
+            .text_size(theme.text.ui.size)
+            .line_height(theme.text.ui.line_height)
+            .child(SectionHeader::new("Outline"))
+            .when(is_empty, |outline| {
+                outline.child(
+                    div()
+                        .px(theme.spacing.sm)
+                        .text_color(theme.colors.text_placeholder)
+                        .child("No headings on this page"),
+                )
+            })
+            .children(rows);
+        let resize_handle =
+            ResizeHandle::new("outline-resize")
+                .on_left_edge()
+                .on_press(cx.listener(|editor, event: &MouseDownEvent, _, cx| {
+                    editor.start_resizing_outline(event, cx)
+                }));
         Some(
             div()
-                .id("page-outline")
                 .debug_selector(|| "page-outline".into())
+                .relative()
                 .flex_none()
-                .w(OUTLINE_WIDTH)
+                .w(dragged_width(cx).unwrap_or(DEFAULT_WIDTH))
                 .h_full()
-                .overflow_y_scroll()
-                .track_scroll(&self.outline_scroll.handle)
                 .cursor_default()
                 .border_l(theme.size.border_width)
                 .border_color(theme.colors.border)
-                .px(theme.spacing.sm)
-                .pb(theme.spacing.lg)
-                .text_size(theme.text.ui.size)
-                .line_height(theme.text.ui.line_height)
                 // A press here is the outline's own: it must not reach the page, which would
                 // put the caret in its last block.
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(SectionHeader::new("Outline"))
-                .when(is_empty, |outline| {
-                    outline.child(
-                        div()
-                            .px(theme.spacing.sm)
-                            .text_color(theme.colors.text_placeholder)
-                            .child("No headings on this page"),
-                    )
+                .child(headings)
+                .child(resize_handle)
+                .when(self.outline.resizing.is_some(), |outline| {
+                    outline.child(self.outline_resize_tracker(cx))
                 })
-                .children(rows)
                 .into_any_element(),
         )
     }
 
-    /// Scrolls the outline to the first heading in view when that has changed.
+    /// Scrolls the outline to the current heading when that has changed.
     fn follow_page_in_outline(&mut self, entries: &[OutlineEntry]) {
-        let first_in_view = entries.iter().position(|entry| entry.is_in_view);
-        if first_in_view == self.outline_scroll.followed {
+        let current = entries.iter().position(|entry| entry.is_current);
+        if current == self.outline.followed {
             return;
         }
-        self.outline_scroll.followed = first_in_view;
-        if let Some(position) = first_in_view {
-            // The outline's first child is its title; its headings follow.
-            self.outline_scroll.handle.scroll_to_item(position + 1);
+        self.outline.followed = current;
+        if let Some(position) = current {
+            // The list's first child is its title; its headings follow.
+            self.outline.scroll.scroll_to_item(position + 1);
         }
     }
 
@@ -200,11 +262,13 @@ impl PageEditor {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let block = entry.block;
-        let hover = theme.colors.hover;
-        let (text, rail) = if entry.is_in_view {
-            (theme.colors.text, theme.colors.accent)
+        let (hover, strong) = (theme.colors.hover, theme.colors.text);
+        // Every heading is quiet but the one the reader is on, which is also underlined: a
+        // border under the words, since that sits lower and finer than the font's own line.
+        let (text, underline) = if entry.is_current {
+            (strong, strong)
         } else {
-            (theme.colors.text_muted, theme.colors.border)
+            (theme.colors.text_muted, gpui::transparent_black())
         };
         div()
             .id(ElementId::NamedInteger(
@@ -212,22 +276,86 @@ impl PageEditor {
                 position as u64,
             ))
             .debug_selector(|| format!("outline-entry-{position}"))
-            .border_l(RAIL_WIDTH)
-            .border_color(rail)
-            .pl(theme.spacing.sm + theme.spacing.md * depth as f32)
-            .pr(theme.spacing.xs)
+            // A row, so that the title in it is only as wide as its words.
+            .flex()
+            .pl(theme.spacing.sm + theme.spacing.lg * depth as f32)
+            .pr(theme.spacing.sm)
             .py(theme.spacing.xxs)
-            .rounded_r(theme.radius.sm)
+            .rounded(theme.radius.sm)
             .cursor_pointer()
             .text_color(text)
-            .when(entry.is_in_view, |row| row.font_weight(FontWeight::MEDIUM))
-            .hover(move |row| row.bg(hover))
-            .ellipsis()
-            .child(entry.title)
+            .hover(move |row| row.bg(hover).text_color(strong))
+            .child(
+                div()
+                    .min_w_0()
+                    .ellipsis()
+                    .border_b(theme.size.border_width)
+                    .border_color(underline)
+                    .child(entry.title),
+            )
             .on_click(
                 cx.listener(move |editor, _, window, cx| editor.go_to_heading(block, window, cx)),
             )
             .into_any_element()
+    }
+
+    fn start_resizing_outline(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        cx.stop_propagation();
+        cx.notify();
+        if event.click_count == 2 {
+            self.outline.resizing = None;
+            return set_width(DEFAULT_WIDTH, cx);
+        }
+        self.outline.resizing = Some(Resizing {
+            start_x: event.position.x,
+            start_width: dragged_width(cx).unwrap_or(DEFAULT_WIDTH),
+        });
+    }
+
+    fn resize_outline_to(&mut self, x: Pixels, cx: &mut Context<Self>) {
+        let Some(resizing) = self.outline.resizing else {
+            return;
+        };
+        // The outline is at the right of the window, so dragging its edge left widens it.
+        set_width(resizing.start_width - (x - resizing.start_x), cx);
+        cx.notify();
+    }
+
+    fn end_resizing_outline(&mut self, cx: &mut Context<Self>) {
+        if self.outline.resizing.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// While the edge is being dragged, follows the pointer anywhere in the window until
+    /// release.
+    fn outline_resize_tracker(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let editor = cx.entity().downgrade();
+        canvas(
+            |_, _, _| {},
+            move |_, _, window, _| {
+                let on_move = editor.clone();
+                window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                    if phase == DispatchPhase::Bubble
+                        && let Some(editor) = on_move.upgrade()
+                    {
+                        editor.update(cx, |editor, cx| {
+                            editor.resize_outline_to(event.position.x, cx)
+                        });
+                    }
+                });
+                let on_up = editor.clone();
+                window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
+                    if phase == DispatchPhase::Bubble
+                        && let Some(editor) = on_up.upgrade()
+                    {
+                        editor.update(cx, |editor, cx| editor.end_resizing_outline(cx));
+                    }
+                });
+            },
+        )
+        .absolute()
+        .size_full()
     }
 
     /// Scrolls the heading to the top of the page area and puts the caret at its start, so
@@ -248,29 +376,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_section_at_the_top_and_headings_starting_on_screen_are_in_view() {
-        // Headings at blocks 0, 10, 20 and 30.
+    fn the_current_heading_is_the_one_whose_section_the_reader_is_in() {
+        // Headings at blocks 0, 10, 20 and 30, with blocks 12 to 17 on screen.
         let headings = [0, 10, 20, 30];
-        assert_eq!(headings_in_view(&headings, &(0..5)), 0..1);
+        let visible = 12..18;
         assert_eq!(
-            headings_in_view(&headings, &(12..18)),
-            1..2,
-            "inside the second section, whose heading has scrolled off"
+            current_heading(&headings, 12, &visible),
+            Some(1),
+            "in the second section, whose heading has scrolled off"
         );
-        assert_eq!(headings_in_view(&headings, &(8..22)), 0..3);
-        assert_eq!(headings_in_view(&headings, &(10..11)), 1..2);
-        assert_eq!(headings_in_view(&headings, &(35..40)), 3..4);
+        assert_eq!(current_heading(&headings, 10, &(8..22)), Some(1));
+        assert_eq!(current_heading(&headings, 20, &(8..22)), Some(2));
+        assert_eq!(current_heading(&headings, 35, &(33..40)), Some(3));
     }
 
     #[test]
-    fn text_above_the_first_heading_belongs_to_no_section() {
-        assert_eq!(headings_in_view(&[5, 9], &(0..3)), 0..0);
-        assert_eq!(headings_in_view(&[5, 9], &(0..6)), 0..1);
-        assert_eq!(headings_in_view(&[], &(0..6)), 0..0);
-        assert_eq!(
-            headings_in_view(&[5, 9], &(0..0)),
-            0..0,
-            "nothing on screen"
-        );
+    fn above_the_first_heading_it_is_that_heading_once_on_screen() {
+        assert_eq!(current_heading(&[5, 9], 0, &(0..3)), None);
+        assert_eq!(current_heading(&[5, 9], 0, &(0..6)), Some(0));
+        assert_eq!(current_heading(&[], 0, &(0..6)), None);
     }
 }

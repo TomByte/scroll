@@ -4,8 +4,8 @@
 use std::time::Duration;
 
 use gpui::{
-    Entity, ListOffset, Modifiers, Pixels, ScrollDelta, ScrollWheelEvent, TestAppContext,
-    TouchPhase, VisualTestContext, point, px,
+    Entity, ListOffset, Modifiers, MouseButton, MouseDownEvent, Pixels, ScrollDelta,
+    ScrollWheelEvent, TestAppContext, TouchPhase, VisualTestContext, point, px,
 };
 use scroll_ui::ScrollSource;
 
@@ -299,19 +299,19 @@ fn open_sections<'a>(
     (editor, cx)
 }
 
-/// The outline's headings, with whether each is marked as in view.
+/// The outline's headings, with whether each is marked as the current one.
 fn outline(editor: &Entity<PageEditor>, cx: &mut VisualTestContext) -> Vec<(String, bool)> {
     editor.read_with(cx, |editor, _| {
         editor
-            .outline_in_view()
+            .outline_headings()
             .into_iter()
-            .map(|(title, is_in_view)| (title.to_string(), is_in_view))
+            .map(|(title, is_current)| (title.to_string(), is_current))
             .collect()
     })
 }
 
 #[gpui::test]
-fn the_outline_lists_headings_and_marks_those_on_screen(cx: &mut TestAppContext) {
+fn the_outline_lists_headings_and_marks_the_one_the_reader_is_on(cx: &mut TestAppContext) {
     let (editor, cx) = open_headed_page(100, cx);
     let page_width = |cx: &mut VisualTestContext| {
         editor.read_with(cx, |editor, _| editor.viewport.unwrap().size.width)
@@ -352,7 +352,15 @@ fn clicking_a_heading_in_the_outline_goes_to_it(cx: &mut TestAppContext) {
         px(0.0) < heading_top && heading_top < px(120.0),
         "near the top of the page area: {heading_top:?}"
     );
-    assert!(outline(&editor, cx)[2].1, "Gamma is marked as in view");
+    assert_eq!(
+        outline(&editor, cx),
+        [
+            ("Alpha".to_string(), false),
+            ("Beta".to_string(), false),
+            ("Gamma".to_string(), true)
+        ],
+        "only Gamma is marked, though the end of Beta still shows above it"
+    );
     let arrived_at = top(&editor, cx);
 
     // Typing carries on in the heading, and the page stays put.
@@ -409,4 +417,94 @@ fn the_section_the_screen_is_in_stays_marked_once_its_heading_scrolls_off(cx: &m
             ("Gamma".to_string(), false)
         ]
     );
+}
+
+#[gpui::test]
+fn the_caret_s_section_is_the_current_one_while_the_caret_is_on_screen(cx: &mut TestAppContext) {
+    // Three headings on the first screen, with the caret in the first.
+    let (editor, cx) = open_sections(&[("Alpha", 3), ("Beta", 3), ("Gamma", 100)], cx);
+    let current = |cx: &mut VisualTestContext| {
+        let headings = outline(&editor, cx).into_iter();
+        let current: Vec<String> = headings
+            .filter(|(_, is_current)| *is_current)
+            .map(|(title, _)| title)
+            .collect();
+        current
+    };
+    assert_eq!(current(cx), ["Alpha"]);
+
+    // Into Beta's text: the page has not scrolled, and Beta is where the reader is.
+    cx.simulate_keystrokes("down down down down down");
+    settle(&editor, cx);
+    assert_eq!(caret_index(&editor, cx), 5);
+    assert_eq!(top(&editor, cx), (0, px(0.0)));
+    assert_eq!(current(cx), ["Beta"]);
+
+    // Selecting whole blocks down into Gamma's section moves the reader there too.
+    cx.simulate_keystrokes("escape down down down down");
+    settle(&editor, cx);
+    assert_eq!(current(cx), ["Gamma"]);
+}
+
+#[gpui::test]
+fn dragging_the_outline_s_edge_resizes_it_between_its_limits(cx: &mut TestAppContext) {
+    let (editor, cx) = open_headed_page(100, cx);
+    let outline_width = |cx: &mut VisualTestContext| {
+        settle(&editor, cx);
+        cx.debug_bounds("page-outline").unwrap().size.width
+    };
+    let page_width = |cx: &mut VisualTestContext| {
+        editor.read_with(cx, |editor, _| editor.viewport.unwrap().size.width)
+    };
+    let (left, none) = (MouseButton::Left, Modifiers::none());
+    // Presses the outline's left edge, drags it `by` to the right and lets go.
+    let drag_edge = |by: Pixels, cx: &mut VisualTestContext| {
+        let outline = cx.debug_bounds("page-outline").unwrap();
+        let edge = point(outline.left() + px(1.0), outline.center().y);
+        cx.simulate_mouse_down(edge, left, none);
+        cx.simulate_mouse_move(point(edge.x + by, edge.y), Some(left), none);
+        cx.simulate_mouse_up(point(edge.x + by, edge.y), left, none);
+    };
+    let (default_width, page_beside_it) = (outline_width(cx), page_width(cx));
+
+    drag_edge(px(-60.0), cx);
+    assert_eq!(outline_width(cx), default_width + px(60.0));
+    assert_eq!(
+        page_width(cx),
+        page_beside_it - px(60.0),
+        "the page gives up the room"
+    );
+    assert_eq!(
+        cx.update(|_, cx| crate::editor::outline::dragged_width(cx)),
+        Some(default_width + px(60.0)),
+        "for the window to keep"
+    );
+
+    // The pointer moving with no button held, after the drag has ended, changes nothing.
+    cx.simulate_mouse_move(point(px(300.0), px(300.0)), None, none);
+    assert_eq!(outline_width(cx), default_width + px(60.0));
+
+    drag_edge(px(-2000.0), cx);
+    let widest = outline_width(cx);
+    assert!(
+        widest > default_width + px(60.0) && widest < px(500.0),
+        "{widest:?}"
+    );
+    drag_edge(px(2000.0), cx);
+    let narrowest = outline_width(cx);
+    assert!(
+        narrowest > px(100.0) && narrowest < default_width,
+        "{narrowest:?}"
+    );
+
+    // A double click on the edge puts it back.
+    let outline = cx.debug_bounds("page-outline").unwrap();
+    cx.simulate_event(MouseDownEvent {
+        position: point(outline.left() + px(1.0), outline.center().y),
+        button: left,
+        modifiers: none,
+        click_count: 2,
+        first_mouse: false,
+    });
+    assert_eq!(outline_width(cx), default_width);
 }

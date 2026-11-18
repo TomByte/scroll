@@ -177,7 +177,7 @@ pub struct PageEditor {
     scroll: PageScroll,
     /// A mouse wheel's steps still being scrolled, while smooth scrolling is on.
     glide: Glide,
-    outline_scroll: outline::OutlineScroll,
+    outline: outline::OutlinePane,
     /// Rendered above the first block and scrolled with the page, e.g. the page title.
     header: Option<AnyView>,
     selection: Selection,
@@ -260,7 +260,7 @@ impl PageEditor {
             scroll: PageScroll::new(rows.count()),
             rows,
             glide: Glide::default(),
-            outline_scroll: outline::OutlineScroll::default(),
+            outline: outline::OutlinePane::default(),
             header: None,
             selection,
             page,
